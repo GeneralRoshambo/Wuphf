@@ -13,3 +13,8 @@ AddType application/manifest+json .webmanifest
     Header set Cache-Control "no-cache"
   </Files>
 </IfModule>
+<IfModule mod_headers.c>
+  <FilesMatch "\.(css|js)$">
+    Header set Cache-Control "no-cache"
+  </FilesMatch>
+</IfModule>

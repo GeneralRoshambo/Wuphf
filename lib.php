@@ -99,6 +99,9 @@ function site_url(): string {
     return (!empty($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . $dir;
 }
 
+/** Version stamp for a static file (its modified time), so browsers refetch it after an update. */
+function asset_v(string $f): int { return (int)@filemtime(__DIR__ . '/' . $f); }
+
 function client_ip(): string { return $_SERVER['REMOTE_ADDR'] ?? '0'; }
 
 function send_mail(string $to, string $subject, string $body): bool {
@@ -519,7 +522,7 @@ function page_head(string $title): void {
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= h($title) ?> · <?= h($CFG['site_name']) ?></title>
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/style.css?v=<?= asset_v('assets/style.css') ?>">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)">
@@ -552,7 +555,7 @@ if (needs_confirm($u)): ?><div class="flash banner" role="status">Confirm your e
 
 function page_foot(): void {
     echo '</main><footer class="foot">Built by <a href="https://modularitynet.com" rel="nofollow noopener" target="_blank">Modularity Networks</a></footer>'
-        . '<script src="assets/app.js"></script></body></html>';
+        . '<script src="assets/app.js?v=' . asset_v('assets/app.js') . '"></script></body></html>';
 }
 
 function compose_box(int $replyTo = 0, string $prefill = ''): void {
