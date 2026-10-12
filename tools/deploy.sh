@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [ -z "${CPANEL_TOKEN:-}" ] && [ "${ALLOW_SKIP:-}" = 1 ]; then echo "No CPANEL_TOKEN set; skipping deploy."; exit 0; fi
+if [ -z "${CPANEL_TOKEN:-}" ] && [ "${ALLOW_SKIP:-}" = 1 ]; then echo "::warning::CPANEL_TOKEN is not set, so nothing was deployed. Add the secrets in GitHub (Settings > Secrets and variables > Actions)."; exit 0; fi
 : "${CPANEL_HOST:?set CPANEL_HOST}" "${CPANEL_USER:?set CPANEL_USER}" "${CPANEL_TOKEN:?set CPANEL_TOKEN}"
 DEPLOY_DIR="${DEPLOY_DIR:-public_html}"; DEPLOY_DIR="${DEPLOY_DIR%/}"
 BASE="${CPANEL_SCHEME:-https}://${CPANEL_HOST}:${CPANEL_PORT:-2083}"

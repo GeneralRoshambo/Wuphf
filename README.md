@@ -40,7 +40,7 @@ export SITE_URL='https://wuphf.lol'
 ./tools/deploy.sh
 ```
 `CPANEL_HOST` is the cPanel server (often not the site's own domain), and `DEPLOY_DIR` is the web root relative to your home directory. Add `DRY_RUN=1` before `./tools/deploy.sh` to preview. The script runs on macOS and Linux.
-To deploy automatically on every push to `main`, add those values as repository secrets (`CPANEL_HOST`, `CPANEL_USER`, `CPANEL_TOKEN`, optional `DEPLOY_DIR`, `SITE_URL`) and the workflow in `.github/workflows/deploy.yml` does the rest. Each deploy stamps a new cache name into `sw.js`, so installed copies of the app refresh.
+To deploy automatically on every push to `main` (and the working branch listed in the workflow), add those values as repository secrets (`CPANEL_HOST`, `CPANEL_USER`, `CPANEL_TOKEN`, optional `DEPLOY_DIR`, `SITE_URL`) and the workflow in `.github/workflows/deploy.yml` does the rest. Each deploy stamps a new cache name into `sw.js`, so installed copies of the app refresh.
 
 ## Security notes
 - `data/` (the database) is blocked from the web by `.htaccess`. If your host ignores `.htaccess`, move `data/` above `public_html` and change `db_file` in `config.php`.

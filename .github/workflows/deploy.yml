@@ -1,11 +1,11 @@
 name: Deploy to cPanel
-# Runs on every push to main, or by hand from the Actions tab.
-# Add these under Settings > Secrets and variables > Actions:
+# Deploys to wuphf.lol after a push to main (or the working branch below), or by hand
+# from the Actions tab. Add these under Settings > Secrets and variables > Actions:
 #   CPANEL_HOST, CPANEL_USER, CPANEL_TOKEN, DEPLOY_DIR (optional), SITE_URL (optional)
-# Without CPANEL_TOKEN the job skips itself.
+# A PHP syntax check runs first, so a broken push is not deployed.
 on:
   push:
-    branches: [main]
+    branches: [main, ccr-1fe5f2ce-2m8vic]
   workflow_dispatch: {}
 concurrency: deploy
 jobs:
@@ -13,6 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check PHP syntax
+        run: |
+          command -v php >/dev/null || sudo apt-get install -y php-cli
+          for f in *.php; do php -l "$f"; done
+          node --check assets/app.js
       - name: Upload to cPanel
         run: ./tools/deploy.sh
         env:
