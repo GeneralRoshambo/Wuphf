@@ -187,7 +187,7 @@ case 'settings':
 <label>Bio (<?= (int)$CFG['max_chars'] ?> chars, no links)
 <textarea name="bio" rows="3" maxlength="<?= (int)$CFG['max_chars'] ?>"><?= h($u['bio']) ?></textarea></label>
 <label>Profile link (shown on your profile only)
-<input type="url" name="website" value="<?= h($u['website']) ?>" maxlength="100" placeholder="https://example.com"></label>
+<input type="text" inputmode="url" autocapitalize="off" name="website" value="<?= h($u['website']) ?>" maxlength="100" placeholder="https://example.com"></label>
 <button class="btn" id="savebtn">Save</button>
 </form>
 <?php page_foot(); break;
