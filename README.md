@@ -32,13 +32,14 @@ The service worker caches only static files (CSS, JS, icons). Pages are always f
 `tools/deploy.sh` uploads the app files with cPanel's `Fileman::upload_files` API, using an API token (cPanel > **Manage API Tokens**). It never uploads `data/`, uploaded photos, or `config.local.php`, so updates cannot touch your database or per-server settings. Put anything server specific (a different `site_url`, `mail_from`, `force_2fa`) in `config.local.php` on the server; it overrides `config.php`.
 
 ```
-export CPANEL_HOST=your-server-hostname   # the cPanel server, often not the site's own domain
-export CPANEL_USER=your-cpanel-username
-export CPANEL_TOKEN=...                    # keep out of the repo
-export DEPLOY_DIR=public_html              # web root, relative to your home directory
-export SITE_URL=https://wuphf.lol         # optional: checked after upload
-./tools/deploy.sh                          # DRY_RUN=1 to preview
+export CPANEL_HOST='your-server-hostname'
+export CPANEL_USER='your-cpanel-username'
+export CPANEL_TOKEN='paste-token-here'
+export DEPLOY_DIR='public_html'
+export SITE_URL='https://wuphf.lol'
+./tools/deploy.sh
 ```
+`CPANEL_HOST` is the cPanel server (often not the site's own domain), and `DEPLOY_DIR` is the web root relative to your home directory. Add `DRY_RUN=1` before `./tools/deploy.sh` to preview. The script runs on macOS and Linux.
 To deploy automatically on every push to `main`, add those values as repository secrets (`CPANEL_HOST`, `CPANEL_USER`, `CPANEL_TOKEN`, optional `DEPLOY_DIR`, `SITE_URL`) and the workflow in `.github/workflows/deploy.yml` does the rest. Each deploy stamps a new cache name into `sw.js`, so installed copies of the app refresh.
 
 ## Security notes

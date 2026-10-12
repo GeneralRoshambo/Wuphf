@@ -22,28 +22,28 @@ CURL=(curl -sS --max-time 90 -H "Authorization: cpanel ${CPANEL_USER}:${CPANEL_T
 [ "${CPANEL_INSECURE:-}" = 1 ] && CURL+=(-k)
 
 # Stage the files to ship (tracked files only, minus dev-only and per-server ones).
+# Written for the bash 3.2 and BSD tools that ship with macOS as well as GNU/Linux.
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 REV="$(git rev-parse --short HEAD 2>/dev/null || date +%s)"
-git ls-files -z | while IFS= read -r -d '' f; do
+git ls-files | while IFS= read -r f; do
   case "$f" in
     README.md|.gitignore|.cpanel.yml|tools/*|.github/*|data/*.sqlite|avatars/*.jpg|avatars/*.gif|config.local.php) continue ;;
   esac
   mkdir -p "$STAGE/$(dirname "$f")"; cp "$f" "$STAGE/$f"
 done
 # Give the service worker a per-deploy cache name so installed copies refresh.
-sed -i "s/^const V = '.*';/const V = 'wuphf-$REV';/" "$STAGE/sw.js"
+sed "s/^const V = '.*';/const V = 'wuphf-$REV';/" "$STAGE/sw.js" > "$STAGE/sw.js.tmp" && mv "$STAGE/sw.js.tmp" "$STAGE/sw.js"
 
 cd "$STAGE"
-mapfile -t DIRS < <(find . -type f -printf '%h\n' | sort -u)
 fail=0
-for d in "${DIRS[@]}"; do
+for d in $(find . -type f | sed 's|/[^/]*$||' | sort -u); do
   rel="${d#./}"; [ "$d" = . ] && rel=""
   target="$DEPLOY_DIR${rel:+/$rel}"
-  args=(-F "dir=$target" -F "overwrite=1"); n=0; names=()
-  while IFS= read -r -d '' f; do
-    n=$((n+1)); args+=(-F "file-$n=@$f"); names+=("${f#./}")
-  done < <(find "$d" -maxdepth 1 -type f -print0 | sort -z)
-  if [ "${DRY_RUN:-}" = 1 ]; then echo "[dry run] $target: ${names[*]}"; continue; fi
+  args=(-F "dir=$target" -F "overwrite=1"); n=0; names=""
+  for f in $(find "$d" -maxdepth 1 -type f | sort); do
+    n=$((n+1)); args+=(-F "file-$n=@$f"); names="$names ${f##*/}"
+  done
+  if [ "${DRY_RUN:-}" = 1 ]; then echo "[dry run] $target:$names"; continue; fi
   out="$("${CURL[@]}" "${args[@]}" "$BASE/execute/Fileman/upload_files")" || { echo "request failed for $target"; fail=1; continue; }
   if echo "$out" | grep -q '"status":1'; then echo "uploaded $n file(s) to $target"
   else echo "cPanel rejected $target: $(echo "$out" | head -c 400)"; fail=1; fi
