@@ -127,3 +127,16 @@ document.addEventListener('click', function (e) {
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape') document.querySelectorAll('details.menu[open]').forEach(function (d) { d.removeAttribute('open'); });
 });
+
+// "Back": go back through your history when you arrived from another page of this site,
+// otherwise the link's own address (the feed) is followed.
+document.addEventListener('click', function (e) {
+  var a = e.target.closest ? e.target.closest('a[data-back]') : null;
+  if (!a || e.metaKey || e.ctrlKey || e.shiftKey || e.button) return;
+  try {
+    var ref = new URL(document.referrer);
+    if (ref.origin === location.origin && ref.href.split('#')[0] !== location.href.split('#')[0] && history.length > 1) {
+      e.preventDefault(); history.back();
+    }
+  } catch (x) {}
+});

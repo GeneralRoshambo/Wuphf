@@ -456,7 +456,7 @@ case 'status':
     }
     page_head('@' . $post['username'] . ': ' . mb_substr($post['body'], 0, 30),
         ['description' => $post['body'], 'url' => permalink($id), 'type' => 'article']);
-    echo '<p class="crumb"><a href="javascript:history.back()">&larr; Back</a></p>';
+    echo '<p class="crumb"><a class="back" href="./" data-back>&larr; Back</a></p>';
     $depth = chain_open($chain, $u);
     echo '<div class="focus">'; render_posts([$post], $u, true); echo '</div>';
     echo '<div id="reply">';
