@@ -2,6 +2,14 @@
 require __DIR__ . '/lib.php';
 
 $route = $_GET['p'] ?? 'home';
+if ($route === 'route') {            // pretty URL from .htaccess: /about, /blog/a-post, /Ryan, redirects, ...
+    $hit = resolve_path((string)($_GET['path'] ?? ''));
+    $route = $hit['route'];
+    $_GET = array_merge($_GET, $hit['get'], ['p' => $route]);
+}
+if ($route === 'sitemap') render_sitemap();
+if ($route === 'robots') render_robots();
+if ($route === 'blogfeed') blog_feed();
 $u     = me();
 
 // ---- POST actions -------------------------------------------------------
@@ -290,6 +298,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $do = (string)($_POST['do'] ?? '');
         $rid = (int)($_POST['rid'] ?? 0);
         $done = fn() => $rid ? q("UPDATE reports SET status = ?, handled_by = ?, handled_at = ? WHERE id = ?", [$do === 'dismiss' ? 'dismissed' : 'resolved', $u['username'], time(), $rid]) : null;
+        if (($cmsRes = admin_cms_post($do, $u)) !== null) { flash($cmsRes[1], $cmsRes[2] ? 'ok' : ''); go($cmsRes[0]); }
         if ($do === 'backup') {
             $tmp = dirname($CFG['db_file']) . '/backup-' . bin2hex(random_bytes(6)) . '.sqlite';
             if (!backup_to($tmp)) { flash('Could not create a backup.'); go('?p=admin&tab=backup'); }
@@ -425,6 +434,7 @@ case 'verify':
 
 case 'user':
     $prof = q('SELECT * FROM users WHERE username = ?', [$_GET['u'] ?? ''])->fetch();
+    if (!$prof && reserved_name((string)($_GET['u'] ?? '')) && ($tgt = reserved_target())) redirect_to(profile_url($tgt['username']), 302);   // reserved names point to the featured member
     if (!$prof) not_found('No such account', 'There is no account with that username.');
     if ((int)$prof['is_suspended'] && !is_admin($u)) not_found('Account suspended', 'This account was suspended for breaking the Rules.');
     $myrel = $u ? (relations_of($u)[(int)$prof['id']] ?? null) : null;
@@ -434,7 +444,9 @@ case 'user':
     $nFollowing = (int)q('SELECT COUNT(*) FROM follows WHERE follower = ?', [$prof['id']])->fetchColumn();
     $nFollowers = (int)q('SELECT COUNT(*) FROM follows WHERE followee = ?', [$prof['id']])->fetchColumn();
     $isF = $u && q('SELECT 1 FROM follows WHERE follower = ? AND followee = ?', [$u['id'], $prof['id']])->fetch();
-    page_head('@' . $prof['username']); ?>
+    page_head('@' . $prof['username'], ['canonical' => profile_url($prof['username']),
+        'description' => $prof['bio'] !== '' ? seo_trim($prof['bio'], 160) : 'Posts by @' . $prof['username'] . ' on ' . $CFG['site_name'] . '.',
+        'robots' => (int)$prof['is_suspended'] ? 'noindex, nofollow' : '']); ?>
 <section class="profile">
 <?= avatar($prof, 96) ?>
 <div><h1>@<?= h($prof['username']) ?></h1>
@@ -542,6 +554,15 @@ Ask for a login code by email each time I log in</label>
 <p class="hint"><a href="?p=account">Password, email, your data and deleting your account &rarr;</a></p>
 <?php page_foot(); break;
 
+case 'blog':
+    page_blog($u); break;
+
+case 'cms':
+case 'article':
+    $item = cms_find($route === 'article' ? 'post' : 'page', (string)($_GET['slug'] ?? ''), is_admin($u));
+    if (!$item) not_found();
+    page_cms_item($item, $u); break;
+
 case 'notifications':
     if (!$u) go('?p=login');
     page_notifications($u); break;
@@ -584,7 +605,7 @@ default:
     // home
     $tab = $_GET['tab'] ?? 'following';
     if (!in_array($tab, ['following', 'all', 'replies'], true) || !$u) $tab = $u ? 'following' : 'all';
-    page_head('Home');
+    page_head('Home', ['title_full' => setting('seo_home_title') !== '' ? setting('seo_home_title') : $CFG['site_name'], 'description' => setting('seo_home_desc'), 'canonical' => site_url() . '/']);
     if ($u) {
         compose_box();
         tab_bar(['following' => 'Following', 'all' => 'Everyone', 'replies' => 'Replies'], $tab, '');

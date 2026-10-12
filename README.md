@@ -8,6 +8,24 @@ Sign up / log in, post (140 chars; the first 5 @usernames in a post don't count)
 
 Links are blocked in posts and bios. The single profile link field is the only place a URL is allowed; it is shown with `rel="nofollow ugc"`.
 
+## Pages, blog and SEO (Admin > Content, SEO, Redirects)
+Admins write **pages** (`/about`) and **blog posts** (`/blog/my-post`) in Markdown, with full control of how they appear in search:
+- **Headings:** the page gets exactly one **H1** (its own field, or the title). In the body write `## H2`, `### H3`, `#### H4` exactly as you want them; they get anchor ids, and an optional table of contents. The editor shows a live **heading outline** and warns about extra H1s, skipped levels, empty or duplicate headings.
+- **Slug:** editable, auto-generated from the title, checked for clashes. Changing the slug of a published item leaves an automatic **301 redirect**.
+- **Meta:** title tag (with `%title%` / `%site%`), meta description, robots (index/noindex, follow/nofollow, noarchive and friends), canonical URL, Open Graph and Twitter card fields, focus keyword, featured image with alt text, excerpt, author name.
+- **Structured data:** automatic JSON-LD (WebPage or BlogPosting, breadcrumbs, organization) or paste your own.
+- **Checks while you type:** a live search-result preview, character counters and an SEO checklist (title and description length, keyword placement, alt text, internal links, word count).
+- **Publishing:** draft, publish, or schedule for later; admins can preview drafts. The last 20 versions are kept and can be restored.
+- **Links in the body:** `[text](https://example.com){nofollow sponsored ugc newtab}`. Raw HTML is never allowed in content; it is escaped.
+- **Site-wide settings (Admin > SEO):** title template, home and blog titles and descriptions, default share image, Twitter handle, organization schema, Google and Bing verification, extra `robots.txt` lines, a "hide the whole site" switch for testing, custom code for the head and footer, pretty URLs on/off.
+- **Redirects (Admin > Redirects):** 301/302 from any old path, with hit counts.
+- **Generated for you:** `/sitemap.xml` (live, indexable pages, posts, blog and member profiles), `/robots.txt`, a blog feed at `/blog/feed.xml`, canonical tags, and `noindex` on login, settings and other private screens.
+Submit `https://yourdomain/sitemap.xml` in Google Search Console and Bing Webmaster Tools.
+
+**Pretty URLs** need Apache rewrites, which the included `.htaccess` provides (standard on cPanel). If your host blocks them, turn off "Pretty URLs" in Admin > SEO and the `/?p=...` addresses keep working. Member profiles also answer at `/Username`.
+
+**Reserved names redirect to one member** (Admin > Names, default `Ryan`): visiting a reserved address such as `/support` sends people to that member's profile with a 302. A page you publish at the same address takes priority.
+
 ## Safety, moderation and admin
 - **Block and mute** (three-dot menu on posts and profiles). Blocking removes follows both ways and stops the person following, replying to, or reacting to you; you stop seeing each other's posts. Muting just hides their posts from your feeds, silently. Manage both from **Settings > Account**.
 - **Reports:** "Report post" or "Report account". Reports go to a private queue at `/?p=admin`; set `admin_email` to also get an email for each one.

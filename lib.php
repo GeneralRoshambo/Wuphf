@@ -97,6 +97,33 @@ function db(): PDO {
     $pdo->exec('CREATE INDEX IF NOT EXISTS notif_user ON notifications(user_id, id)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS reserved_names (
         name TEXT PRIMARY KEY COLLATE NOCASE, note TEXT NOT NULL DEFAULT \'\', created INTEGER NOT NULL)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS settings (k TEXT PRIMARY KEY, v TEXT NOT NULL DEFAULT \'\')');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS cms (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL, title TEXT NOT NULL, slug TEXT NOT NULL,
+        body TEXT NOT NULL DEFAULT \'\', excerpt TEXT NOT NULL DEFAULT \'\',
+        status TEXT NOT NULL DEFAULT \'draft\', published_at INTEGER NOT NULL DEFAULT 0,
+        created INTEGER NOT NULL, updated INTEGER NOT NULL,
+        author_id INTEGER, author_name TEXT NOT NULL DEFAULT \'\',
+        h1 TEXT NOT NULL DEFAULT \'\', meta_title TEXT NOT NULL DEFAULT \'\', meta_desc TEXT NOT NULL DEFAULT \'\',
+        robots_index INTEGER NOT NULL DEFAULT 1, robots_follow INTEGER NOT NULL DEFAULT 1, robots_extra TEXT NOT NULL DEFAULT \'\',
+        canonical TEXT NOT NULL DEFAULT \'\',
+        og_title TEXT NOT NULL DEFAULT \'\', og_desc TEXT NOT NULL DEFAULT \'\', og_image TEXT NOT NULL DEFAULT \'\',
+        twitter_card TEXT NOT NULL DEFAULT \'\', focus_kw TEXT NOT NULL DEFAULT \'\',
+        schema_type TEXT NOT NULL DEFAULT \'auto\', schema_json TEXT NOT NULL DEFAULT \'\',
+        toc INTEGER NOT NULL DEFAULT 0, show_footer INTEGER NOT NULL DEFAULT 0, nav_label TEXT NOT NULL DEFAULT \'\',
+        featured_image TEXT NOT NULL DEFAULT \'\', featured_alt TEXT NOT NULL DEFAULT \'\')');
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS cms_slug ON cms(type, slug)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS cms_list ON cms(type, status, published_at)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS cms_revisions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cms_id INTEGER NOT NULL REFERENCES cms(id) ON DELETE CASCADE,
+        title TEXT NOT NULL, body TEXT NOT NULL, saved_at INTEGER NOT NULL, saved_by TEXT NOT NULL DEFAULT \'\')');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS cms_rev ON cms_revisions(cms_id, id)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS redirects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        from_path TEXT NOT NULL COLLATE NOCASE UNIQUE, to_url TEXT NOT NULL,
+        code INTEGER NOT NULL DEFAULT 301, hits INTEGER NOT NULL DEFAULT 0, note TEXT NOT NULL DEFAULT \'\', created INTEGER NOT NULL)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS bookmarks (
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -696,15 +723,8 @@ function page_head(string $title, array $meta = []): void {
     ?><!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title><?= h($title) ?> · <?= h($CFG['site_name']) ?></title>
-<?php $desc = $meta['description'] ?? 'Short thoughts. 140 characters. No links.'; ?>
-<meta name="description" content="<?= h($desc) ?>">
-<meta property="og:site_name" content="<?= h($CFG['site_name']) ?>">
-<meta property="og:title" content="<?= h($title) ?>">
-<meta property="og:description" content="<?= h($desc) ?>">
-<meta property="og:type" content="<?= h($meta['type'] ?? 'website') ?>">
-<meta property="og:url" content="<?= h($meta['url'] ?? site_url()) ?>">
-<meta name="twitter:card" content="summary">
+<base href="<?= h(request_base()) ?>">
+<?php seo_head($title, $meta); ?>
 <link rel="stylesheet" href="assets/style.css?v=<?= asset_v('assets/style.css') ?>">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="alternate" type="application/rss+xml" title="<?= h($CFG['site_name']) ?>" href="?p=rss">
@@ -717,6 +737,7 @@ function page_head(string $title, array $meta = []): void {
 <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Wuphf">
+<?= seo_custom_html('head') ?>
 </head><body>
 <header><div class="bar"><a class="logo" href="./"><?= h($CFG['site_name']) ?></a><nav class="nav">
 <?php if ($u): $unread = unread_count($u); ?>
@@ -740,15 +761,21 @@ function page_head(string $title, array $meta = []): void {
 <form class="search" action="./" method="get" role="search"><input type="hidden" name="p" value="search">
 <input type="search" name="q" value="<?= h(($_GET['p'] ?? '') === 'search' ? ($_GET['q'] ?? '') : '') ?>" placeholder="Search" maxlength="60" aria-label="Search"></form>
 </div></header>
-<main class="col">
+<main class="col<?= !empty($GLOBALS['wide']) ? ' wide' : '' ?>">
 <?php if ($m = flash()): ?><div class="flash <?= h($m['k']) ?>" role="status"><?= h($m['m']) ?></div><?php endif;
 if (needs_confirm($u)): ?><div class="flash banner" role="status">Confirm your email to start posting. We sent a link to <b><?= h($u['email']) ?></b>.
 <form method="post" action="?p=resend" class="inl"><input type="hidden" name="csrf" value="<?= csrf() ?>"><button class="lnk">Resend link</button></form></div><?php endif;
 }
 
 function page_foot(): void {
-    echo '</main><footer class="foot"><div class="flinks"><a href="?p=page&amp;n=rules">Rules</a><a href="?p=page&amp;n=privacy">Privacy</a><a href="?p=rss">RSS</a></div>Built by <a href="https://modularitynet.com" rel="nofollow noopener" target="_blank">Modularity Networks</a></footer>'
-        . (is_admin(me()) ? '<div class="build">Build ' . h(build_id()) . '</div>' : '') . '<div id="toast" role="status" aria-live="polite"></div><script src="assets/app.js?v=' . asset_v('assets/app.js') . '"></script></body></html>';
+    $links = '<a href="?p=page&amp;n=rules">Rules</a><a href="?p=page&amp;n=privacy">Privacy</a><a href="?p=rss">RSS</a>';
+    if (blog_count() > 0) $links = '<a href="' . h(blog_href()) . '">' . h(setting('seo_blog_title') ?: 'Blog') . '</a>' . $links;
+    foreach (footer_pages() as $fp) $links = '<a href="' . h(cms_href($fp)) . '">' . h($fp['nav_label'] !== '' ? $fp['nav_label'] : $fp['title']) . '</a>' . $links;
+    $extra = '';
+    foreach ($GLOBALS['extra_js'] ?? [] as $js) $extra .= '<script src="assets/' . h($js) . '?v=' . asset_v('assets/' . $js) . '"></script>';
+    echo '</main><footer class="foot"><div class="flinks">' . $links . '</div>Built by <a href="https://modularitynet.com" rel="nofollow noopener" target="_blank">Modularity Networks</a></footer>'
+        . (is_admin(me()) ? '<div class="build">Build ' . h(build_id()) . '</div>' : '') . '<div id="toast" role="status" aria-live="polite"></div>'
+        . '<script src="assets/app.js?v=' . asset_v('assets/app.js') . '"></script>' . $extra . seo_custom_html('foot') . '</body></html>';
 }
 
 function compose_box(int $replyTo = 0, string $prefill = ''): void {
@@ -768,3 +795,5 @@ function compose_box(int $replyTo = 0, string $prefill = ''): void {
 }
 
 require __DIR__ . '/extras.php';
+require __DIR__ . '/cms.php';
+require __DIR__ . '/cms_admin.php';

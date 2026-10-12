@@ -13,7 +13,7 @@ function is_admin(?array $u): bool {
 
 /** Names that sign-ups and renames cannot take: the config admin list plus the reserved list managed on the Admin screen. */
 function reserved_name(string $name): bool {
-    if (in_array(strtolower($name), admin_names(), true)) return true;
+    if (in_array(strtolower($name), admin_names(), true) || name_collides_with_site($name)) return true;
     return (bool)q('SELECT 1 FROM reserved_names WHERE name = ?', [$name])->fetch();
 }
 
@@ -292,11 +292,12 @@ function page_static(string $n): void {
 }
 
 function page_admin(array $u): void {
-    $tab = in_array($_GET['tab'] ?? '', ['users', 'names', 'backup'], true) ? $_GET['tab'] : 'reports';
+    $tab = in_array($_GET['tab'] ?? '', ['users', 'names', 'content', 'seo', 'redirects', 'backup'], true) ? $_GET['tab'] : 'reports';
+    if ($tab === 'content' && (isset($_GET['edit']) || isset($_GET['new']))) $GLOBALS['wide'] = true;
     $open = (int)q("SELECT COUNT(*) FROM reports WHERE status = 'open'")->fetchColumn();
     page_head('Admin');
-    echo '<h1>Admin</h1><div class="tabs">';
-    foreach (['reports' => 'Reports' . ($open ? " ($open)" : ''), 'users' => 'Accounts', 'names' => 'Names', 'backup' => 'Backup'] as $k => $l)
+    echo '<h1>Admin</h1><div class="tabs admintabs">';
+    foreach (['reports' => 'Reports' . ($open ? " ($open)" : ''), 'users' => 'Accounts', 'content' => 'Content', 'seo' => 'SEO', 'redirects' => 'Redirects', 'names' => 'Names', 'backup' => 'Backup'] as $k => $l)
         echo '<a href="?p=admin&amp;tab=' . $k . '" class="' . ($tab === $k ? 'on' : '') . '">' . h($l) . '</a>';
     echo '</div>';
     $csrf = '<input type="hidden" name="csrf" value="' . csrf() . '">';
@@ -344,7 +345,17 @@ function page_admin(array $u): void {
             }
             echo '</div></div>';
         }
+    } elseif ($tab === 'content') {
+        admin_content($u);
+    } elseif ($tab === 'seo') {
+        admin_seo();
+    } elseif ($tab === 'redirects') {
+        admin_redirects();
     } elseif ($tab === 'names') {
+        $tgt = reserved_target();
+        echo '<div class="card"><h2>Where reserved names go</h2><p class="hint">Visiting a reserved address such as <b>' . h(site_url()) . '/support</b> sends people to this member\'s profile.'
+            . (setting('reserved_redirect') !== '' && !$tgt ? ' <b>No active member has that name, so reserved addresses show a 404 page.</b>' : '') . '</p>'
+            . '<form method="post" action="?p=admin" class="addname">' . $csrf . '<input type="hidden" name="do" value="names_target"><input name="target" value="' . h(setting('reserved_redirect')) . '" maxlength="15" placeholder="username" aria-label="Username to redirect to"><button class="btn sm">Save</button></form></div>';
         echo '<div class="card"><h2>Reserved usernames</h2><p class="hint">Nobody can sign up with, or rename to, a reserved name. Accounts that already have one keep it. '
             . 'To give a reserved name to someone, rename their account on the Accounts tab (admins are not blocked).</p>'
             . '<form method="post" action="?p=admin" class="addname">' . $csrf . '<input type="hidden" name="do" value="reserve_add">'

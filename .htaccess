@@ -3,7 +3,7 @@ DirectoryIndex index.php
 <FilesMatch "\.(sqlite|db|md)$">
   Require all denied
 </FilesMatch>
-<FilesMatch "^(config|config\.local|lib|extras|pages|prompts|backup)\.php$">
+<FilesMatch "^(config|config\.local|lib|extras|pages|prompts|backup|cms|cms_admin)\.php$">
   Require all denied
 </FilesMatch>
 
@@ -17,4 +17,17 @@ AddType application/manifest+json .webmanifest
   <FilesMatch "\.(css|js)$">
     Header set Cache-Control "no-cache"
   </FilesMatch>
+</IfModule>
+
+# Pretty URLs: anything that is not a real file or folder goes to index.php, which looks up
+# pages, blog posts, redirects and member profiles. If your host does not allow this, turn off
+# "Pretty URLs" in Admin > SEO and the ?p=... addresses keep working.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # robots.txt and sitemap.xml are generated from Admin > SEO, even if an old file is still on the server.
+  RewriteRule ^robots\.txt$ index.php?p=robots [L]
+  RewriteRule ^sitemap\.xml$ index.php?p=sitemap [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule ^(.+)$ index.php?p=route&path=$1 [L,QSA]
 </IfModule>
