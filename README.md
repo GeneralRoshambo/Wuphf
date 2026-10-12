@@ -15,6 +15,7 @@ Links are blocked in posts and bios. The single profile link field is the only p
   ```php
   <?php return ['admins' => ['yourusername'], 'admin_email' => 'you@example.com', 'contact_email' => 'you@example.com'];
   ```
+  **Everything else is in the browser:** open **Admin > Names** to reserve or release usernames (with a one-click set of common names such as admin, support and moderator), and **Admin > Accounts** to rename an account, make or remove admins, suspend or delete. Names in `config.local.php` show as *locked* and can only be changed in that file, as a safety net so you can never lock yourself out.
   An admin must have a **confirmed email**. A name in the admins list is **reserved**: nobody can sign up or rename to it while it is listed, so create or rename the account first (Settings > Account > Change username), confirm its email, and only then add the name to `config.local.php`.
   Admins can remove reported posts, suspend or restore accounts (suspended people are signed out at once and their posts are hidden), delete accounts, and download a database backup.
 - **Rules and Privacy** pages live in `pages.php`. They are a plain-language starting point; have them reviewed for your situation.

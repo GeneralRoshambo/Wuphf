@@ -3,15 +3,22 @@
 // Loaded at the end of lib.php, so everything in lib.php is available here.
 
 // ---- Who can see what -----------------------------------------------------
+/** Admin usernames fixed in config.local.php. These cannot be removed from the admin screen. */
 function admin_names(): array { global $CFG; return array_map('strtolower', (array)$CFG['admins']); }
 
-/** An admin is a listed username whose email address is confirmed. */
+/** An admin is someone listed in config.local.php or marked admin on the Admin screen, with a confirmed email. */
 function is_admin(?array $u): bool {
-    return $u && (int)$u['email_ok'] === 1 && in_array(strtolower($u['username']), admin_names(), true);
+    return $u && (int)$u['email_ok'] === 1 && (in_array(strtolower($u['username']), admin_names(), true) || (int)($u['is_admin'] ?? 0) === 1);
 }
 
-/** Usernames in the admin list cannot be claimed by new sign-ups or renames, so nobody can grab one before its owner does. */
-function reserved_name(string $name): bool { return in_array(strtolower($name), admin_names(), true); }
+/** Names that sign-ups and renames cannot take: the config admin list plus the reserved list managed on the Admin screen. */
+function reserved_name(string $name): bool {
+    if (in_array(strtolower($name), admin_names(), true)) return true;
+    return (bool)q('SELECT 1 FROM reserved_names WHERE name = ?', [$name])->fetch();
+}
+
+const COMMON_RESERVED = ['admin', 'administrator', 'support', 'help', 'staff', 'mod', 'moderator', 'official', 'root', 'system',
+                         'security', 'abuse', 'postmaster', 'webmaster', 'info', 'contact', 'team', 'news', 'api', 'wuphf'];
 
 /** The viewer's own block / mute choices: user id => 'block' | 'mute'. */
 function relations_of(?array $viewer): array {
@@ -285,11 +292,11 @@ function page_static(string $n): void {
 }
 
 function page_admin(array $u): void {
-    $tab = in_array($_GET['tab'] ?? '', ['users', 'backup'], true) ? $_GET['tab'] : 'reports';
+    $tab = in_array($_GET['tab'] ?? '', ['users', 'names', 'backup'], true) ? $_GET['tab'] : 'reports';
     $open = (int)q("SELECT COUNT(*) FROM reports WHERE status = 'open'")->fetchColumn();
     page_head('Admin');
     echo '<h1>Admin</h1><div class="tabs">';
-    foreach (['reports' => 'Reports' . ($open ? " ($open)" : ''), 'users' => 'Accounts', 'backup' => 'Backup'] as $k => $l)
+    foreach (['reports' => 'Reports' . ($open ? " ($open)" : ''), 'users' => 'Accounts', 'names' => 'Names', 'backup' => 'Backup'] as $k => $l)
         echo '<a href="?p=admin&amp;tab=' . $k . '" class="' . ($tab === $k ? 'on' : '') . '">' . h($l) . '</a>';
     echo '</div>';
     $csrf = '<input type="hidden" name="csrf" value="' . csrf() . '">';
@@ -324,12 +331,34 @@ function page_admin(array $u): void {
             echo '<div class="arow"><div class="who"><a href="?p=user&amp;u=' . h($r['username']) . '"><b>@' . h($r['username']) . '</b></a>'
                 . ((int)$r['is_suspended'] ? ' <span class="pill bad">suspended</span>' : '') . (is_admin($r) ? ' <span class="pill">admin</span>' : '')
                 . '<br><small>' . h($r['email'] ?: 'no email') . ((int)$r['email_ok'] ? '' : ' (unconfirmed)') . ' &middot; ' . (int)$r['np'] . ' posts &middot; joined ' . h(date('M j, Y', (int)$r['created'])) . '</small></div><div class="ractions">';
+            echo '<form method="post" action="?p=admin" class="inl renamef">' . $csrf . '<input type="hidden" name="do" value="rename_user">' . $uidf
+                . '<input name="name" class="mini" placeholder="new username" maxlength="15" pattern="[A-Za-z0-9_]{3,15}" aria-label="New username for @' . h($r['username']) . '"><button class="btn sm alt">Rename</button></form> ';
+            $locked = in_array(strtolower($r['username']), admin_names(), true);
+            if ((int)$r['id'] !== (int)$u['id'] && !$locked) {
+                echo (int)$r['is_admin'] ? $btn('remove_admin', 'Remove admin', $uidf, 'Remove admin rights from this account?')
+                                         : ((int)$r['email_ok'] ? $btn('make_admin', 'Make admin', $uidf, 'Give this account full admin rights?') : '');
+            }
             if (!is_admin($r)) {
                 echo (int)$r['is_suspended'] ? $btn('unsuspend', 'Restore', $uidf) : $btn('suspend', 'Suspend', $uidf, 'Suspend this account?', 'dangerbtn');
                 echo $btn('delete_user', 'Delete', $uidf, 'Delete this account and everything it posted?', 'dangerbtn');
             }
             echo '</div></div>';
         }
+    } elseif ($tab === 'names') {
+        echo '<div class="card"><h2>Reserved usernames</h2><p class="hint">Nobody can sign up with, or rename to, a reserved name. Accounts that already have one keep it. '
+            . 'To give a reserved name to someone, rename their account on the Accounts tab (admins are not blocked).</p>'
+            . '<form method="post" action="?p=admin" class="addname">' . $csrf . '<input type="hidden" name="do" value="reserve_add">'
+            . '<input name="name" required maxlength="15" pattern="[A-Za-z0-9_]{3,15}" placeholder="username to reserve" aria-label="Username to reserve">'
+            . '<input name="note" maxlength="80" placeholder="note (optional)" aria-label="Note"><button class="btn sm">Reserve</button></form>'
+            . $btn('reserve_common', 'Reserve common names', '', '', '') . '<span class="hint">admin, support, help, staff, moderator, official, root and a few more</span></div>';
+        $names = q('SELECT r.name, r.note, r.created, (SELECT username FROM users WHERE lower(username) = lower(r.name)) AS owner FROM reserved_names r ORDER BY r.name')->fetchAll();
+        foreach (admin_names() as $n) echo '<div class="arow"><div class="who"><b>' . h($n) . '</b> <span class="pill">locked</span><br><small>Admin username set in config.local.php. Edit that file to change it.</small></div></div>';
+        foreach ($names as $r) {
+            echo '<div class="arow"><div class="who"><b>' . h($r['name']) . '</b>' . ($r['owner'] ? ' <span class="pill">in use by @' . h($r['owner']) . '</span>' : '')
+                . '<br><small>' . h($r['note'] !== '' ? $r['note'] . ' &middot; ' : '') . 'added ' . h(date('M j, Y', (int)$r['created'])) . '</small></div><div class="ractions">'
+                . $btn('reserve_remove', 'Remove', '<input type="hidden" name="name" value="' . h($r['name']) . '">') . '</div></div>';
+        }
+        if (!$names && !admin_names()) echo '<p class="empty">No reserved names yet.</p>';
     } else {
         echo '<div class="card"><h2>Database backup</h2><p class="hint">Downloads a copy of the whole database (accounts, posts, everything). Keep it somewhere safe and private. '
             . 'To also keep automatic copies on the server, see the README (it uses <code>backup.php</code> with a cPanel cron job).</p>'

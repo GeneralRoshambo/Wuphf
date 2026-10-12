@@ -26,6 +26,7 @@ function db(): PDO {
         sess INTEGER NOT NULL DEFAULT 0,
         pending_email TEXT NOT NULL DEFAULT \'\',
         renamed_at INTEGER NOT NULL DEFAULT 0,
+        is_admin INTEGER NOT NULL DEFAULT 0,
         avatar_v INTEGER NOT NULL DEFAULT 0,
         avatar_ext TEXT NOT NULL DEFAULT \'jpg\',
         created INTEGER NOT NULL)');
@@ -42,7 +43,7 @@ function db(): PDO {
     if (!in_array('avatar_ext', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN avatar_ext TEXT NOT NULL DEFAULT \'jpg\'');
     if (!in_array('reply_to', $have('posts')))   $pdo->exec('ALTER TABLE posts ADD COLUMN reply_to INTEGER REFERENCES posts(id) ON DELETE SET NULL');
     foreach (['email TEXT NOT NULL DEFAULT \'\'', 'email_ok INTEGER NOT NULL DEFAULT 0', 'twofa INTEGER NOT NULL DEFAULT 0',
-              'is_suspended INTEGER NOT NULL DEFAULT 0', 'sess INTEGER NOT NULL DEFAULT 0', 'pending_email TEXT NOT NULL DEFAULT \'\'', 'renamed_at INTEGER NOT NULL DEFAULT 0'] as $def) {
+              'is_suspended INTEGER NOT NULL DEFAULT 0', 'sess INTEGER NOT NULL DEFAULT 0', 'pending_email TEXT NOT NULL DEFAULT \'\'', 'renamed_at INTEGER NOT NULL DEFAULT 0', 'is_admin INTEGER NOT NULL DEFAULT 0'] as $def) {
         if (!in_array(strtok($def, ' '), $have('users'))) $pdo->exec("ALTER TABLE users ADD COLUMN $def");
     }
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(lower(email)) WHERE email <> \'\'');
@@ -94,6 +95,8 @@ function db(): PDO {
         is_read INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)');
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS notif_once ON notifications(user_id, actor_id, kind, COALESCE(post_id, 0))');
     $pdo->exec('CREATE INDEX IF NOT EXISTS notif_user ON notifications(user_id, id)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS reserved_names (
+        name TEXT PRIMARY KEY COLLATE NOCASE, note TEXT NOT NULL DEFAULT \'\', created INTEGER NOT NULL)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS bookmarks (
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -728,7 +731,7 @@ function page_head(string $title, array $meta = []): void {
 </span>
 </nav>
 <form class="search" action="./" method="get" role="search"><input type="hidden" name="p" value="search">
-<input type="search" name="q" value="<?= h($_GET['q'] ?? '') ?>" placeholder="Search" maxlength="60" aria-label="Search"></form>
+<input type="search" name="q" value="<?= h(($_GET['p'] ?? '') === 'search' ? ($_GET['q'] ?? '') : '') ?>" placeholder="Search" maxlength="60" aria-label="Search"></form>
 </div></header>
 <main class="col">
 <?php if ($m = flash()): ?><div class="flash <?= h($m['k']) ?>" role="status"><?= h($m['m']) ?></div><?php endif;

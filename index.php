@@ -278,7 +278,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if ($do === 'delete') {
             if (strcasecmp(trim((string)($_POST['typed'] ?? '')), $u['username']) !== 0) { flash('Type your username exactly to confirm.'); go('?p=account'); }
-            if (is_admin($u)) { flash('Remove yourself from the admins list in config.local.php before deleting this account.'); go('?p=account'); }
+            if (is_admin($u)) { flash('Admins cannot delete their own account. Ask another admin to remove your admin rights first (or edit config.local.php).'); go('?p=account'); }
             delete_user((int)$u['id']);
             $_SESSION = []; session_destroy();
             session_start(); flash('Your account was deleted.', 'ok'); go('./');
@@ -305,6 +305,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         elseif ($do === 'delete_user') {
             $tid = (int)($_POST['uid'] ?? 0); $tt = q('SELECT * FROM users WHERE id = ?', [$tid])->fetch();
             if ($tt && !is_admin($tt)) { delete_user($tid); flash('Deleted @' . $tt['username'] . '.', 'ok'); }
+        }
+        elseif ($do === 'reserve_add') {
+            $nm = trim((string)($_POST['name'] ?? ''));
+            if (!preg_match('/^[A-Za-z0-9_]{3,15}$/', $nm)) flash('Names are 3-15 letters, numbers or underscores.');
+            else { q('INSERT OR IGNORE INTO reserved_names (name, note, created) VALUES (?,?,?)', [$nm, mb_substr(clean((string)($_POST['note'] ?? '')), 0, 80), time()]); flash('Reserved ' . $nm . '.', 'ok'); }
+        }
+        elseif ($do === 'reserve_common') {
+            foreach (COMMON_RESERVED as $nm) q('INSERT OR IGNORE INTO reserved_names (name, note, created) VALUES (?,?,?)', [$nm, 'common name', time()]);
+            flash('Reserved ' . count(COMMON_RESERVED) . ' common names.', 'ok');
+        }
+        elseif ($do === 'reserve_remove') { q('DELETE FROM reserved_names WHERE name = ?', [(string)($_POST['name'] ?? '')]); flash('Reservation removed.', 'ok'); }
+        elseif ($do === 'rename_user') {
+            $tid = (int)($_POST['uid'] ?? 0); $nm = trim((string)($_POST['name'] ?? ''));
+            if (!preg_match('/^[A-Za-z0-9_]{3,15}$/', $nm)) flash('Names are 3-15 letters, numbers or underscores.');
+            elseif (q('SELECT 1 FROM users WHERE username = ? AND id != ?', [$nm, $tid])->fetch()) flash('That username is taken.');
+            elseif (!q('SELECT 1 FROM users WHERE id = ?', [$tid])->fetch()) flash('No such account.');
+            else { q('UPDATE users SET username = ?, renamed_at = ? WHERE id = ?', [$nm, time(), $tid]); flash('Renamed to @' . $nm . '.', 'ok'); }
+        }
+        elseif ($do === 'make_admin' || $do === 'remove_admin') {
+            $tid = (int)($_POST['uid'] ?? 0); $tt = q('SELECT * FROM users WHERE id = ?', [$tid])->fetch();
+            if (!$tt || $tid === (int)$u['id'] || in_array(strtolower($tt['username']), admin_names(), true)) flash('That account\'s admin rights cannot be changed here.');
+            elseif ($do === 'make_admin' && !(int)$tt['email_ok']) flash('The account must have a confirmed email first.');
+            else { q('UPDATE users SET is_admin = ? WHERE id = ?', [$do === 'make_admin' ? 1 : 0, $tid]); flash(($do === 'make_admin' ? '@' . $tt['username'] . ' is now an admin.' : 'Removed admin rights from @' . $tt['username'] . '.'), 'ok'); }
         }
         elseif ($do === 'dismiss' || $do === 'resolve') { $done(); flash($do === 'dismiss' ? 'Report dismissed.' : 'Marked as handled.', 'ok'); }
         go($_SERVER['HTTP_REFERER'] ?? '?p=admin');
