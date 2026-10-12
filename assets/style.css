@@ -221,7 +221,8 @@ select{display:block;width:100%;margin-top:6px;padding:11px 14px;border:1px soli
 .rhead{margin-bottom:4px}.rbody blockquote{margin:6px 0;padding:6px 12px;border-left:3px solid var(--line);color:var(--mute);overflow-wrap:anywhere}
 .ractions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.arow .ractions{margin:0}
 .pill{font-size:.7rem;padding:2px 8px;border-radius:999px;background:var(--chip);color:var(--mute);font-weight:600}.pill.bad{background:var(--bad);color:#fff}
-.flinks{display:flex;gap:16px;justify-content:center;margin-bottom:6px}
+.flinks{display:flex;flex-wrap:wrap;gap:6px 16px;justify-content:center;margin-bottom:6px}
+.fpages{font-weight:600}
 @media (max-width:520px){
   .bar{gap:6px 8px}
   .nav{gap:0 9px;font-size:.82rem;margin-left:auto}

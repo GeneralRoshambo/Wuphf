@@ -44,7 +44,7 @@ function admin_content_edit(?array $r, string $type): void {
     $new = !$r;
     $r = $r ?: ['id' => 0, 'type' => $type, 'title' => '', 'slug' => '', 'body' => '', 'excerpt' => '', 'status' => 'draft', 'published_at' => 0, 'author_name' => '', 'h1' => '', 'meta_title' => '',
                 'meta_desc' => '', 'robots_index' => 1, 'robots_follow' => 1, 'robots_extra' => '', 'canonical' => '', 'og_title' => '', 'og_desc' => '', 'og_image' => '', 'twitter_card' => '',
-                'focus_kw' => '', 'schema_type' => 'auto', 'schema_json' => '', 'toc' => 0, 'show_footer' => 0, 'nav_label' => '', 'featured_image' => '', 'featured_alt' => ''];
+                'focus_kw' => '', 'schema_type' => 'auto', 'schema_json' => '', 'toc' => 0, 'show_footer' => 1, 'nav_label' => '', 'featured_image' => '', 'featured_alt' => ''];
     $post = $type === 'post';
     // Show what was typed if the last save failed validation.
     $kept = $_SESSION['cms_form'] ?? null; unset($_SESSION['cms_form']);

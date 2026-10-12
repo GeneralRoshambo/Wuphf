@@ -783,11 +783,12 @@ if (needs_confirm($u)): ?><div class="flash banner" role="status">Confirm your e
 
 function page_foot(): void {
     $links = '<a href="?p=page&amp;n=rules">Rules</a><a href="?p=page&amp;n=privacy">Privacy</a><a href="?p=rss">RSS</a>';
-    if (blog_count() > 0) $links = '<a href="' . h(blog_href()) . '">' . h(setting('seo_blog_title') ?: 'Blog') . '</a>' . $links;
-    foreach (footer_pages() as $fp) $links = '<a href="' . h(cms_href($fp)) . '">' . h($fp['nav_label'] !== '' ? $fp['nav_label'] : $fp['title']) . '</a>' . $links;
+    $links = '<a href="' . h(blog_href()) . '">' . h(setting('seo_blog_title') ?: 'Blog') . '</a>' . $links;
+    $pages = '';
+    foreach (footer_pages() as $fp) $pages .= '<a href="' . h(cms_href($fp)) . '">' . h($fp['nav_label'] !== '' ? $fp['nav_label'] : $fp['title']) . '</a>';
     $extra = '';
     foreach ($GLOBALS['extra_js'] ?? [] as $js) $extra .= '<script src="assets/' . h($js) . '?v=' . asset_v('assets/' . $js) . '"></script>';
-    echo '</main><footer class="foot"><div class="flinks">' . $links . '</div>Built by <a href="https://modularitynet.com" rel="nofollow noopener" target="_blank">Modularity Networks</a></footer>'
+    echo '</main><footer class="foot">' . ($pages !== '' ? '<nav class="flinks fpages" aria-label="Pages">' . $pages . '</nav>' : '') . '<nav class="flinks" aria-label="Site">' . $links . '</nav>Built by <a href="https://modularitynet.com" rel="nofollow noopener" target="_blank">Modularity Networks</a></footer>'
         . (is_admin(me()) ? '<div class="build">Build ' . h(build_id()) . '</div>' : '') . '<div id="toast" role="status" aria-live="polite"></div>'
         . '<script src="assets/app.js?v=' . asset_v('assets/app.js') . '"></script>' . $extra . seo_custom_html('foot') . '</body></html>';
 }
