@@ -2,11 +2,10 @@
 require __DIR__ . '/lib.php';
 
 $route = $_GET['p'] ?? 'home';
-$post  = $_SERVER['REQUEST_METHOD'] === 'POST';
 $u     = me();
 
 // ---- POST actions -------------------------------------------------------
-if ($post) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     check_csrf();
     switch ($route) {
     case 'register':
@@ -19,13 +18,12 @@ if ($post) {
             q('INSERT INTO users (username, pass, created) VALUES (?,?,?)', [$name, password_hash($pw, PASSWORD_DEFAULT), time()]);
             session_regenerate_id(true);
             $_SESSION['uid'] = (int)db()->lastInsertId();
-            flash('Welcome to ' . $CFG['site_name'] . '!'); go('./');
+            flash('Welcome to ' . $CFG['site_name'] . '!', 'ok'); go('./');
         }
         flash($err); go('?p=register');
 
     case 'login':
         $row = q('SELECT * FROM users WHERE username = ?', [trim($_POST['username'] ?? '')])->fetch();
-        // Always run a hash check so timing doesn't reveal valid usernames.
         $hash = $row['pass'] ?? '$2y$10$usesomesillystringforsaltuMHQxZfC8m1GkF0n2vGX5bKq6x1b2e';
         if (password_verify((string)($_POST['password'] ?? ''), $hash) && $row) {
             session_regenerate_id(true);
@@ -42,14 +40,23 @@ if ($post) {
 
     switch ($route) {
     case 'post':
-        $body = clean((string)($_POST['body'] ?? ''));
-        $last = (int)q('SELECT MAX(created) FROM posts WHERE user_id = ?', [$u['id']])->fetchColumn();
+        $body  = clean((string)($_POST['body'] ?? ''));
+        $reply = (int)($_POST['reply_to'] ?? 0);
+        $back  = $reply ? '?p=status&id=' . $reply : './';
+        $last  = (int)q('SELECT MAX(created) FROM posts WHERE user_id = ?', [$u['id']])->fetchColumn();
+        if ($reply && !q('SELECT 1 FROM posts WHERE id = ?', [$reply])->fetch()) { flash('That post no longer exists.'); go('./'); }
         if ($body === '') flash('Say something first.');
-        elseif (len($body) > $CFG['max_chars']) flash('Too long: ' . $CFG['max_chars'] . ' characters max.');
+        elseif (len($body) > hard_max() || counted_len($body) > $CFG['max_chars'])
+            flash('Too long: ' . $CFG['max_chars'] . ' characters max (@usernames are free).');
         elseif (has_link($body)) flash('Links are not allowed.');
         elseif (time() - $last < $CFG['min_post_gap']) flash('Slow down a moment.');
-        else q('INSERT INTO posts (user_id, body, created) VALUES (?,?,?)', [$u['id'], $body, time()]);
-        go('./');
+        else {
+            q('INSERT INTO posts (user_id, body, reply_to, created) VALUES (?,?,?,?)', [$u['id'], $body, $reply ?: null, time()]);
+            $id = (int)db()->lastInsertId();
+            foreach (extract_tags($body) as $t) q('INSERT OR IGNORE INTO post_tags (post_id, tag) VALUES (?,?)', [$id, $t]);
+            if ($reply) flash('Reply posted.', 'ok');
+        }
+        go($back);
 
     case 'delete':
         q('DELETE FROM posts WHERE id = ? AND user_id = ?', [(int)($_POST['id'] ?? 0), $u['id']]);
@@ -66,26 +73,19 @@ if ($post) {
     case 'settings':
         $bio = clean((string)($_POST['bio'] ?? ''));
         if (len($bio) > $CFG['max_chars']) { flash('Bio is limited to ' . $CFG['max_chars'] . ' characters.'); go('?p=settings'); }
-        if (has_link($bio)) { flash('Links are not allowed in bios.'); go('?p=settings'); }
-        q('UPDATE users SET bio = ? WHERE id = ?', [$bio, $u['id']]);
+        if (has_link($bio)) { flash('Links are not allowed in your bio. Use the profile link field instead.'); go('?p=settings'); }
+        [$site, $err] = clean_website((string)($_POST['website'] ?? ''));
+        if ($err) { flash($err); go('?p=settings'); }
         if (!empty($_FILES['photo']['name'])) {
             if ($e = save_avatar((int)$u['id'], $_FILES['photo'])) { flash($e); go('?p=settings'); }
         }
-        flash('Saved.'); go('?p=settings');
+        q('UPDATE users SET bio = ?, website = ? WHERE id = ?', [$bio, $site, $u['id']]);
+        flash('Profile saved.', 'ok'); go('?p=settings');
     }
     http_response_code(404); exit('Not found');
 }
 
 // ---- Pages --------------------------------------------------------------
-$per = (int)$CFG['per_page'];
-$before = (int)($_GET['before'] ?? 0);
-$cur = $before > 0 ? 'AND p.id < ' . $before : '';
-$sel = 'SELECT p.*, u.username, u.avatar_v FROM posts p JOIN users u ON u.id = p.user_id';
-
-function more_link(array $rows, int $per, string $extra = ''): void {
-    if (count($rows) > $per) echo '<p class="more"><a href="?' . $extra . 'before=' . (int)$rows[$per - 1]['id'] . '">Older &rarr;</a></p>';
-}
-
 switch ($route) {
 case 'login':
 case 'register':
@@ -105,7 +105,6 @@ case 'register':
 case 'user':
     $prof = q('SELECT * FROM users WHERE username = ?', [$_GET['u'] ?? ''])->fetch();
     if (!$prof) { http_response_code(404); page_head('Not found'); echo '<h1>No such user</h1>'; page_foot(); break; }
-    $rows = q("$sel WHERE p.user_id = ? $cur ORDER BY p.id DESC LIMIT " . ($per + 1), [$prof['id']])->fetchAll();
     $nPosts = (int)q('SELECT COUNT(*) FROM posts WHERE user_id = ?', [$prof['id']])->fetchColumn();
     $nFollowing = (int)q('SELECT COUNT(*) FROM follows WHERE follower = ?', [$prof['id']])->fetchColumn();
     $nFollowers = (int)q('SELECT COUNT(*) FROM follows WHERE followee = ?', [$prof['id']])->fetchColumn();
@@ -114,49 +113,103 @@ case 'user':
 <section class="profile">
 <?= avatar($prof, 96) ?>
 <div><h1>@<?= h($prof['username']) ?></h1>
-<?php if ($prof['bio'] !== ''): ?><p><?= h($prof['bio']) ?></p><?php endif; ?>
+<?php if ($prof['bio'] !== ''): ?><p><?= render_body($prof['bio']) ?></p><?php endif; ?>
+<?php if ($prof['website'] !== ''): ?><p class="site"><a href="<?= h($prof['website']) ?>" target="_blank" rel="nofollow noopener noreferrer ugc"><?= h(preg_replace('~^https?://(www\.)?~i', '', rtrim($prof['website'], '/'))) ?></a></p><?php endif; ?>
 <p class="stats"><b><?= $nPosts ?></b> posts · <b><?= $nFollowing ?></b> following · <b><?= $nFollowers ?></b> followers</p>
 <?php if ($u && (int)$u['id'] !== (int)$prof['id']): ?>
 <form method="post" action="?p=follow"><input type="hidden" name="csrf" value="<?= csrf() ?>">
 <input type="hidden" name="id" value="<?= (int)$prof['id'] ?>">
 <?php if ($isF): ?><input type="hidden" name="unfollow" value="1"><button class="btn alt">Unfollow</button>
 <?php else: ?><button class="btn">Follow</button><?php endif; ?></form>
-<?php endif; ?></div></section>
-<?php render_posts(array_slice($rows, 0, $per), $u);
-    if (!$rows) echo '<p class="empty">No posts yet.</p>';
-    more_link($rows, $per, 'p=user&amp;u=' . h($prof['username']) . '&amp;');
+<?php elseif ($u): ?><a class="btn alt" href="?p=settings">Edit profile</a><?php endif; ?></div></section>
+<?php feed('p.user_id = ?', [$prof['id']], 'p=user&amp;u=' . h($prof['username']) . '&amp;', 'No posts yet.');
+    page_foot(); break;
+
+case 'status':
+    $id = (int)($_GET['id'] ?? 0);
+    $post = q(POST_SELECT . ' WHERE p.id = ?', [$id])->fetch();
+    if (!$post) { http_response_code(404); page_head('Not found'); echo '<h1>That post is gone</h1>'; page_foot(); break; }
+    $chain = []; $cur = $post;
+    for ($i = 0; $i < 10 && $cur['reply_to']; $i++) {
+        $cur = q(POST_SELECT . ' WHERE p.id = ?', [$cur['reply_to']])->fetch();
+        if (!$cur) break;
+        array_unshift($chain, $cur);
+    }
+    $replies = q(POST_SELECT . ' WHERE p.reply_to = ? ORDER BY p.id ASC LIMIT 200', [$id])->fetchAll();
+    page_head('@' . $post['username'] . ': ' . mb_substr($post['body'], 0, 30));
+    echo '<p class="crumb"><a href="javascript:history.back()">&larr; Back</a></p>';
+    render_posts($chain, $u, true);
+    echo '<div class="focus">'; render_posts([$post], $u, true); echo '</div>';
+    echo '<div id="reply">';
+    if ($u) compose_box($id, '@' . $post['username'] . ' ');
+    else echo '<p class="empty"><a href="?p=login">Log in</a> to reply.</p>';
+    echo '</div>';
+    render_posts($replies, $u, true);
+    page_foot(); break;
+
+case 'tag':
+    $tag = mb_strtolower(trim((string)($_GET['t'] ?? '')), 'UTF-8');
+    page_head('#' . $tag); echo '<h1>#' . h($tag) . '</h1>';
+    feed('p.id IN (SELECT post_id FROM post_tags WHERE tag = ?)', [$tag], 'p=tag&amp;t=' . h(urlencode($tag)) . '&amp;', 'Nothing tagged #' . $tag . ' yet.');
+    page_foot(); break;
+
+case 'search':
+    $qs = trim((string)($_GET['q'] ?? ''));
+    if ($qs !== '' && $qs[0] === '#' && len($qs) > 1) go('?p=tag&t=' . urlencode(ltrim($qs, '#')));
+    page_head('Search'); ?>
+<h1>Search</h1>
+<form class="card" action="./" method="get" role="search"><input type="hidden" name="p" value="search">
+<input type="search" name="q" value="<?= h($qs) ?>" placeholder="Search people and posts, or try #hashtag" maxlength="60" autofocus></form>
+<?php if ($qs !== '') {
+        $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], ltrim($qs, '@')) . '%';
+        $people = q("SELECT * FROM users WHERE username LIKE ? ESCAPE '\\' OR bio LIKE ? ESCAPE '\\' ORDER BY username LIMIT 10", [$like, $like])->fetchAll();
+        if ($people) {
+            echo '<h2>People</h2>';
+            foreach ($people as $pp) {
+                echo '<a class="card person" href="?p=user&amp;u=' . h($pp['username']) . '">' . avatar($pp, 40)
+                    . '<span><b>@' . h($pp['username']) . '</b>' . ($pp['bio'] !== '' ? '<br><small>' . h($pp['bio']) . '</small>' : '') . '</span></a>';
+            }
+        }
+        echo '<h2>Posts</h2>';
+        feed("p.body LIKE ? ESCAPE '\\'", [$like], 'p=search&amp;q=' . h(urlencode($qs)) . '&amp;', 'No posts match "' . $qs . '".');
+    }
     page_foot(); break;
 
 case 'settings':
     if (!$u) go('?p=login');
     page_head('Settings'); ?>
 <h1>Settings</h1>
-<form method="post" action="?p=settings" enctype="multipart/form-data" class="card">
+<form method="post" action="?p=settings" enctype="multipart/form-data" class="card" data-saving>
 <input type="hidden" name="csrf" value="<?= csrf() ?>">
-<div class="center"><?= avatar($u, 96) ?></div>
-<label>Profile photo (JPEG/PNG/GIF, max 2 MB) <input type="file" name="photo" accept="image/jpeg,image/png,image/gif"></label>
+<div class="center" id="avprev"><?= avatar($u, 96) ?></div>
+<label>Profile photo (JPEG, PNG, or an animated GIF up to 1 MB)
+<input type="file" name="photo" id="photo" accept="image/jpeg,image/png,image/gif"></label>
 <label>Bio (<?= (int)$CFG['max_chars'] ?> chars, no links)
 <textarea name="bio" rows="3" maxlength="<?= (int)$CFG['max_chars'] ?>"><?= h($u['bio']) ?></textarea></label>
-<button class="btn">Save</button>
+<label>Profile link (shown on your profile only)
+<input type="url" name="website" value="<?= h($u['website']) ?>" maxlength="100" placeholder="https://example.com"></label>
+<button class="btn" id="savebtn">Save</button>
 </form>
 <?php page_foot(); break;
 
+case 'public':
+    page_head('Public feed'); ?>
+<h1>Public feed</h1>
+<p class="sub">Everything posted on <?= h($CFG['site_name']) ?>, newest first. <?php if (!$u): ?><a href="?p=register">Join in</a>.<?php endif; ?></p>
+<?php feed('1=1', [], 'p=public&amp;', 'No posts yet.');
+    page_foot(); break;
+
 default: // home
     $tab = ($u && ($_GET['tab'] ?? 'following') !== 'all') ? 'following' : 'all';
-    if ($tab === 'following') {
-        $rows = q("$sel WHERE (p.user_id = ?1 OR p.user_id IN (SELECT followee FROM follows WHERE follower = ?1)) $cur
-                   ORDER BY p.id DESC LIMIT " . ($per + 1), [$u['id']])->fetchAll();
-    } else {
-        $rows = q("$sel WHERE 1=1 $cur ORDER BY p.id DESC LIMIT " . ($per + 1))->fetchAll();
-    }
     page_head('Home');
     if ($u) {
         compose_box(); ?>
 <div class="tabs"><a href="./" class="<?= $tab === 'following' ? 'on' : '' ?>">Following</a>
 <a href="?tab=all" class="<?= $tab === 'all' ? 'on' : '' ?>">Everyone</a></div>
 <?php } else { echo '<p class="hero">Short thoughts. 140 characters. No links, no noise. <a href="?p=register">Join in</a>.</p>'; }
-    render_posts(array_slice($rows, 0, $per), $u);
-    if (!$rows) echo '<p class="empty">' . ($tab === 'following' ? 'Nothing here yet. Post something, or follow people from the Everyone tab.' : 'No posts yet.') . '</p>';
-    more_link($rows, $per, $tab === 'all' && $u ? 'tab=all&amp;' : '');
+    if ($tab === 'following') {
+        feed('p.user_id = ?1 OR p.user_id IN (SELECT followee FROM follows WHERE follower = ?1)', [$u['id']], '',
+             'Nothing here yet. Post something, or follow people from the Everyone tab.');
+    } else feed('1=1', [], $u ? 'tab=all&amp;' : '');
     page_foot();
 }

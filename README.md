@@ -4,7 +4,9 @@ A tiny Twitter-style microblog: 140 characters, plain text only (links are rejec
 Plain PHP + SQLite, no Composer, no build step, no database to set up.
 
 ## Features
-Sign up / log in, post (140 chars), delete own posts, follow / unfollow, "Following" and "Everyone" timelines, profiles with bio and photo, pagination.
+Sign up / log in, post (140 chars; the first 5 @usernames in a post don't count), delete own posts, replies and threads, #hashtags and @mentions, search (people, posts, #tags), a public feed anyone can read without logging in, follow / unfollow, "Following" and "Everyone" timelines, profiles with bio, photo (animated GIFs supported, up to 1 MB / 512 px) and one profile link, pagination.
+
+Links are blocked in posts and bios. The single profile link field is the only place a URL is allowed; it is shown with `rel="nofollow ugc"`.
 
 ## Install on cPanel
 1. Upload everything in this folder to `public_html` (or a subfolder / subdomain root) with File Manager or FTP.

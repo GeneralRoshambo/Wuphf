@@ -32,3 +32,18 @@ textarea{resize:vertical}
 .stats{color:#657786;font-size:.9rem}
 .center{display:flex;justify-content:center;margin-bottom:12px}
 .empty,.hero{color:#657786;text-align:center;padding:20px 0}.more{text-align:center}
+.flash.ok{background:#e3f6e8;border-color:#8fd0a0;color:#14532d}
+header .wrap{flex-wrap:wrap;gap:8px 14px;padding-block:8px}
+.search{flex:1 1 140px;max-width:220px;margin:0}
+.search input{margin:0;padding:6px 12px;border-radius:20px;background:#f3f5f7;font-size:.9rem}
+h2{font-size:1rem;margin:18px 0 8px;color:#657786}
+.sub{color:#657786;margin:-.3em 0 12px}
+.crumb{margin:0 0 8px;font-size:.9rem}
+.acts{margin-top:6px;font-size:.85rem}.acts a{color:#657786}
+.rl{font-size:.85rem;color:#657786;margin-top:2px}
+.pb p a{font-weight:600}
+.focus .post{border-color:#1d6fb8;border-width:2px}
+.site{margin:.3em 0}.site a{font-weight:600;overflow-wrap:anywhere}
+.person{display:flex;gap:12px;align-items:center;color:inherit;text-decoration:none}.person small{color:#657786}
+.busy{opacity:.6;pointer-events:none}.btn:disabled{opacity:.7;cursor:wait}
+#reply .compose{margin-top:10px}

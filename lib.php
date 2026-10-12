@@ -18,14 +18,28 @@ function db(): PDO {
         username TEXT NOT NULL UNIQUE COLLATE NOCASE,
         pass TEXT NOT NULL,
         bio TEXT NOT NULL DEFAULT "",
+        website TEXT NOT NULL DEFAULT "",
         avatar_v INTEGER NOT NULL DEFAULT 0,
+        avatar_ext TEXT NOT NULL DEFAULT "jpg",
         created INTEGER NOT NULL)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS posts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         body TEXT NOT NULL,
+        reply_to INTEGER REFERENCES posts(id) ON DELETE SET NULL,
         created INTEGER NOT NULL)');
+    // Upgrade databases created by earlier versions.
+    $have = fn($t) => array_column($pdo->query("PRAGMA table_info($t)")->fetchAll(), 'name');
+    if (!in_array('website', $have('users')))    $pdo->exec('ALTER TABLE users ADD COLUMN website TEXT NOT NULL DEFAULT ""');
+    if (!in_array('avatar_ext', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN avatar_ext TEXT NOT NULL DEFAULT "jpg"');
+    if (!in_array('reply_to', $have('posts')))   $pdo->exec('ALTER TABLE posts ADD COLUMN reply_to INTEGER REFERENCES posts(id) ON DELETE SET NULL');
     $pdo->exec('CREATE INDEX IF NOT EXISTS posts_user ON posts(user_id, id)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS posts_reply ON posts(reply_to)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS post_tags (
+        post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+        tag TEXT NOT NULL,
+        PRIMARY KEY (post_id, tag))');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS tags_tag ON post_tags(tag, post_id)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS follows (
         follower INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         followee INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -38,6 +52,9 @@ function q(string $sql, array $args = []): PDOStatement {
     $st->execute($args);
     return $st;
 }
+
+if (!function_exists('mb_strtolower')) { function mb_strtolower($s, $e = null) { return strtolower($s); } }
+if (!function_exists('mb_substr')) { function mb_substr($s, $a, $l = null, $e = null) { preg_match_all('/./su', $s, $m); return implode('', array_slice($m[0], $a, $l)); } }
 
 function h($s): string { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 
@@ -78,8 +95,8 @@ function check_csrf(): void {
     }
 }
 
-function flash(?string $msg = null): ?string {
-    if ($msg !== null) { $_SESSION['flash'] = $msg; return null; }
+function flash(?string $msg = null, string $kind = ''): ?array {
+    if ($msg !== null) { $_SESSION['flash'] = ['m' => $msg, 'k' => $kind]; return null; }
     $m = $_SESSION['flash'] ?? null;
     unset($_SESSION['flash']);
     return $m;
@@ -99,7 +116,7 @@ function avatar(array $u, int $size = 48): string {
     $name = $u['username'];
     if ((int)$u['avatar_v'] > 0) {
         return '<img class="av" width="' . $size . '" height="' . $size . '" alt="" src="avatars/'
-            . (int)$u['id'] . '.jpg?v=' . (int)$u['avatar_v'] . '">';
+            . (int)($u['uid'] ?? $u['id']) . '.' . ($u['avatar_ext'] === 'gif' ? 'gif' : 'jpg') . '?v=' . (int)$u['avatar_v'] . '">';
     }
     $hue = crc32(strtolower($name)) % 360;
     return '<span class="av ph" style="width:' . $size . 'px;height:' . $size . 'px;line-height:' . $size
@@ -107,39 +124,123 @@ function avatar(array $u, int $size = 48): string {
         . h(strtoupper($name[0])) . '</span>';
 }
 
-/** Validate an uploaded image and store a 128x128 JPEG. Returns an error or null. */
+/** Validate an uploaded image and store it. GIFs are kept as-is so they stay animated;
+ *  JPEG/PNG are re-encoded to a 128x128 JPEG. Returns an error message or null. */
 function save_avatar(int $uid, array $f): ?string {
-    if (!function_exists('imagecreatefromstring')) return 'Photo uploads need the PHP GD extension (enable it in cPanel > Select PHP Version).';
     if ($f['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($f['tmp_name'])) return 'Upload failed.';
-    if ($f['size'] > 2 * 1024 * 1024) return 'Photo must be under 2 MB.';
     $info = @getimagesize($f['tmp_name']);
     if (!$info || !in_array($info[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_GIF], true)) return 'Use a JPEG, PNG or GIF.';
-    if ($info[0] * $info[1] > 25000000) return 'Image dimensions are too large.';
-    $src = @imagecreatefromstring((string)file_get_contents($f['tmp_name']));
-    if (!$src) return 'Could not read that image.';
-    $w = imagesx($src); $h = imagesy($src); $s = min($w, $h);
-    $dst = imagecreatetruecolor(128, 128);
-    imagefill($dst, 0, 0, imagecolorallocate($dst, 255, 255, 255));
-    imagecopyresampled($dst, $src, 0, 0, intdiv($w - $s, 2), intdiv($h - $s, 2), 128, 128, $s, $s);
-    $ok = imagejpeg($dst, __DIR__ . '/avatars/' . $uid . '.jpg', 88);
-    imagedestroy($src); imagedestroy($dst);
-    if (!$ok) return 'Could not save the photo (is avatars/ writable?).';
-    q('UPDATE users SET avatar_v = ? WHERE id = ?', [time(), $uid]);
+    $dir = __DIR__ . '/avatars/';
+    if ($info[2] === IMAGETYPE_GIF) {
+        if ($f['size'] > 1024 * 1024) return 'Animated GIFs must be under 1 MB.';
+        if ($info[0] > 512 || $info[1] > 512) return 'GIFs can be at most 512x512 pixels.';
+        $raw = (string)file_get_contents($f['tmp_name']);
+        if (strncmp($raw, 'GIF8', 4) !== 0 || str_contains($raw, '<?')) return 'That GIF looks invalid.';
+        if (file_put_contents($dir . $uid . '.gif', $raw) === false) return 'Could not save the photo (is avatars/ writable?).';
+        @unlink($dir . $uid . '.jpg'); $ext = 'gif';
+    } else {
+        if (!function_exists('imagecreatefromstring')) return 'JPEG/PNG uploads need the PHP GD extension (enable it in cPanel > Select PHP Version). GIFs work without it.';
+        if ($f['size'] > 2 * 1024 * 1024) return 'Photo must be under 2 MB.';
+        if ($info[0] * $info[1] > 25000000) return 'Image dimensions are too large.';
+        $src = @imagecreatefromstring((string)file_get_contents($f['tmp_name']));
+        if (!$src) return 'Could not read that image.';
+        $w = imagesx($src); $h = imagesy($src); $s = min($w, $h);
+        $dst = imagecreatetruecolor(128, 128);
+        imagefill($dst, 0, 0, imagecolorallocate($dst, 255, 255, 255));
+        imagecopyresampled($dst, $src, 0, 0, intdiv($w - $s, 2), intdiv($h - $s, 2), 128, 128, $s, $s);
+        $ok = imagejpeg($dst, $dir . $uid . '.jpg', 88);
+        imagedestroy($src); imagedestroy($dst);
+        if (!$ok) return 'Could not save the photo (is avatars/ writable?).';
+        @unlink($dir . $uid . '.gif'); $ext = 'jpg';
+    }
+    q('UPDATE users SET avatar_v = ?, avatar_ext = ? WHERE id = ?', [time(), $ext, $uid]);
     return null;
 }
 
-function render_posts(array $rows, ?array $viewer): void {
+/** Profile link: http(s) only, no spaces, short. Returns [value, error]. */
+function clean_website(string $w): array {
+    $w = trim($w);
+    if ($w === '') return ['', null];
+    if (!preg_match('~^https?://~i', $w)) $w = 'https://' . $w;
+    $p = filter_var($w, FILTER_VALIDATE_URL) ? parse_url($w) : false;
+    if (!$p || empty($p['host']) || !str_contains($p['host'], '.') || strlen($w) > 100
+        || !in_array(strtolower($p['scheme']), ['http', 'https'], true)) return ['', 'That profile link is not a valid web address (max 100 characters).'];
+    return [$w, null];
+}
+
+// ---- Text: mentions, hashtags, length ------------------------------------
+const MENTION_RE = '/(?<!\w)@[A-Za-z0-9_]{3,15}(?!\w) ?/u'; // includes one trailing space
+
+/** Length that counts toward the limit: the first N @usernames are free. */
+function counted_len(string $s): int {
+    global $CFG;
+    preg_match_all(MENTION_RE, $s, $m);
+    $free = 0;
+    foreach (array_slice($m[0], 0, (int)$CFG['free_mentions']) as $x) $free += len($x);
+    return len($s) - $free;
+}
+
+/** Longest raw post we will accept: the limit plus the free mentions at full size. */
+function hard_max(): int { global $CFG; return $CFG['max_chars'] + $CFG['free_mentions'] * 17; }
+
+function extract_tags(string $s): array {
+    preg_match_all('/(?<!\w)#([\p{L}\p{N}_]{1,30})/u', $s, $m);
+    $tags = [];
+    foreach ($m[1] as $t) if (!ctype_digit($t)) $tags[mb_strtolower($t, 'UTF-8')] = true;
+    return array_slice(array_keys($tags), 0, 10);
+}
+
+/** Escape a post body and turn @mentions and #hashtags into links. */
+function render_body(string $raw): string {
+    $out = '';
+    foreach (preg_split('/((?<!\w)[#@][\p{L}\p{N}_]+)/u', $raw, -1, PREG_SPLIT_DELIM_CAPTURE) as $i => $part) {
+        if ($i % 2 === 0) { $out .= h($part); continue; }
+        $w = substr($part, 1);
+        if ($part[0] === '@' && preg_match('/^[A-Za-z0-9_]{3,15}$/', $w)) {
+            $out .= '<a href="?p=user&amp;u=' . h($w) . '">@' . h($w) . '</a>';
+        } elseif ($part[0] === '#' && len($w) <= 30 && !ctype_digit($w)) {
+            $out .= '<a href="?p=tag&amp;t=' . h(urlencode(mb_strtolower($w, 'UTF-8'))) . '">#' . h($w) . '</a>';
+        } else $out .= h($part);
+    }
+    return $out;
+}
+
+const POST_SELECT = 'SELECT p.*, u.id AS uid, u.username, u.avatar_v, u.avatar_ext,
+    (SELECT COUNT(*) FROM posts r WHERE r.reply_to = p.id) AS replies,
+    (SELECT u2.username FROM posts pp JOIN users u2 ON u2.id = pp.user_id WHERE pp.id = p.reply_to) AS reply_user
+    FROM posts p JOIN users u ON u.id = p.user_id';
+
+/** Run a feed query ($where uses ? placeholders) with keyset pagination and print it. */
+function feed(string $where, array $args, string $qs, string $empty = 'No posts yet.'): void {
+    global $CFG;
+    $per = (int)$CFG['per_page'];
+    $before = (int)($_GET['before'] ?? 0);
+    $cur = $before > 0 ? ' AND p.id < ' . $before : '';
+    $rows = q(POST_SELECT . " WHERE ($where)$cur ORDER BY p.id DESC LIMIT " . ($per + 1), $args)->fetchAll();
+    render_posts(array_slice($rows, 0, $per), me());
+    if (!$rows) echo '<p class="empty">' . h($empty) . '</p>';
+    if (count($rows) > $per) echo '<p class="more"><a href="?' . $qs . 'before=' . (int)$rows[$per - 1]['id'] . '">Older &rarr;</a></p>';
+}
+
+function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
     foreach ($rows as $p) {
-        echo '<article class="post">';
+        echo '<article class="post" id="p' . (int)$p['id'] . '">';
         echo '<a href="?p=user&amp;u=' . h($p['username']) . '">' . avatar($p, 48) . '</a>';
         echo '<div class="pb"><div class="ph"><a class="un" href="?p=user&amp;u=' . h($p['username']) . '">@'
-            . h($p['username']) . '</a> <span class="t">' . h(ago((int)$p['created'])) . '</span>';
+            . h($p['username']) . '</a> <a class="t" href="?p=status&amp;id=' . (int)$p['id'] . '">' . h(ago((int)$p['created'])) . '</a>';
         if ($viewer && (int)$viewer['id'] === (int)$p['user_id']) {
             echo '<form method="post" action="?p=delete" class="inl" onsubmit="return confirm(\'Delete this post?\')">'
                 . '<input type="hidden" name="csrf" value="' . csrf() . '"><input type="hidden" name="id" value="' . (int)$p['id']
-                . '"><button class="lnk" title="Delete">delete</button></form>';
+                . '"><button class="lnk del" title="Delete">delete</button></form>';
         }
-        echo '</div><p>' . h($p['body']) . '</p></div></article>';
+        echo '</div>';
+        if ($p['reply_to'] && $p['reply_user'] && !$thread) {
+            echo '<div class="rl">Replying to <a href="?p=status&amp;id=' . (int)$p['reply_to'] . '">@' . h($p['reply_user']) . '</a></div>';
+        }
+        echo '<p>' . render_body($p['body']) . '</p>';
+        echo '<div class="acts"><a href="?p=status&amp;id=' . (int)$p['id'] . '#reply">Reply'
+            . ((int)$p['replies'] ? ' · ' . (int)$p['replies'] : '') . '</a></div>';
+        echo '</div></article>';
     }
 }
 
@@ -159,24 +260,30 @@ function page_head(string $title): void {
 </head><body>
 <header><div class="wrap"><a class="logo" href="./"><?= h($CFG['site_name']) ?></a><nav>
 <?php if ($u): ?>
+<a href="?p=public">Public</a>
 <a href="?p=user&amp;u=<?= h($u['username']) ?>">@<?= h($u['username']) ?></a>
 <a href="?p=settings">Settings</a>
 <form method="post" action="?p=logout" class="inl"><input type="hidden" name="csrf" value="<?= csrf() ?>"><button class="lnk">Log out</button></form>
 <?php else: ?>
-<a href="?p=login">Log in</a><?php if ($CFG['allow_signup']): ?> <a href="?p=register">Sign up</a><?php endif; ?>
+<a href="?p=public">Public</a> <a href="?p=login">Log in</a><?php if ($CFG['allow_signup']): ?> <a href="?p=register">Sign up</a><?php endif; ?>
 <?php endif; ?>
-</nav></div></header>
+</nav>
+<form class="search" action="./" method="get" role="search"><input type="hidden" name="p" value="search">
+<input type="search" name="q" value="<?= h($_GET['q'] ?? '') ?>" placeholder="Search" maxlength="60" aria-label="Search"></form>
+</div></header>
 <main class="wrap">
-<?php if ($m = flash()): ?><div class="flash"><?= h($m) ?></div><?php endif;
+<?php if ($m = flash()): ?><div class="flash <?= h($m['k']) ?>" role="status"><?= h($m['m']) ?></div><?php endif;
 }
 
 function page_foot(): void { echo "</main><script src=\"assets/app.js\"></script></body></html>"; }
 
-function compose_box(): void {
+function compose_box(int $replyTo = 0, string $prefill = ''): void {
     global $CFG; ?>
-<form method="post" action="?p=post" class="compose">
+<form method="post" action="?p=post" class="compose" id="<?= $replyTo ? 'reply' : 'compose' ?>">
 <input type="hidden" name="csrf" value="<?= csrf() ?>">
-<textarea name="body" id="body" rows="3" maxlength="<?= (int)$CFG['max_chars'] ?>" placeholder="What's happening? (plain text, no links)" required></textarea>
-<div class="row"><span id="count" data-max="<?= (int)$CFG['max_chars'] ?>"><?= (int)$CFG['max_chars'] ?></span><button class="btn">Wuphf</button></div>
+<?php if ($replyTo): ?><input type="hidden" name="reply_to" value="<?= $replyTo ?>"><?php endif; ?>
+<textarea name="body" id="body" rows="<?= $replyTo ? 2 : 3 ?>" maxlength="<?= hard_max() ?>"
+ placeholder="<?= $replyTo ? 'Write your reply' : "What's happening? (plain text, no links)" ?>" required><?= h($prefill) ?></textarea>
+<div class="row"><span id="count" data-max="<?= (int)$CFG['max_chars'] ?>" data-free="<?= (int)$CFG['free_mentions'] ?>"><?= (int)$CFG['max_chars'] ?></span><button class="btn"><?= $replyTo ? 'Reply' : 'Wuphf' ?></button></div>
 </form><?php
 }
