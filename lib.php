@@ -25,6 +25,7 @@ function db(): PDO {
         is_suspended INTEGER NOT NULL DEFAULT 0,
         sess INTEGER NOT NULL DEFAULT 0,
         pending_email TEXT NOT NULL DEFAULT \'\',
+        renamed_at INTEGER NOT NULL DEFAULT 0,
         avatar_v INTEGER NOT NULL DEFAULT 0,
         avatar_ext TEXT NOT NULL DEFAULT \'jpg\',
         created INTEGER NOT NULL)');
@@ -41,7 +42,7 @@ function db(): PDO {
     if (!in_array('avatar_ext', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN avatar_ext TEXT NOT NULL DEFAULT \'jpg\'');
     if (!in_array('reply_to', $have('posts')))   $pdo->exec('ALTER TABLE posts ADD COLUMN reply_to INTEGER REFERENCES posts(id) ON DELETE SET NULL');
     foreach (['email TEXT NOT NULL DEFAULT \'\'', 'email_ok INTEGER NOT NULL DEFAULT 0', 'twofa INTEGER NOT NULL DEFAULT 0',
-              'is_suspended INTEGER NOT NULL DEFAULT 0', 'sess INTEGER NOT NULL DEFAULT 0', 'pending_email TEXT NOT NULL DEFAULT \'\''] as $def) {
+              'is_suspended INTEGER NOT NULL DEFAULT 0', 'sess INTEGER NOT NULL DEFAULT 0', 'pending_email TEXT NOT NULL DEFAULT \'\'', 'renamed_at INTEGER NOT NULL DEFAULT 0'] as $def) {
         if (!in_array(strtok($def, ' '), $have('users'))) $pdo->exec("ALTER TABLE users ADD COLUMN $def");
     }
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(lower(email)) WHERE email <> \'\'');

@@ -14,6 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $email = strtolower(trim((string)($_POST['email'] ?? '')));
         if (!rate_ok('signup:' . client_ip(), 10, 3600)) $err = 'Too many sign-ups from your network. Try again later.';
         elseif (!preg_match('/^[A-Za-z0-9_]{3,15}$/', $name)) $err = 'Username: 3-15 letters, numbers or underscores.';
+        elseif (reserved_name($name)) $err = 'That username is reserved.';
         elseif (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 120) $err = 'Enter a valid email address.';
         elseif (strlen($pw) < 8) $err = 'Password must be at least 8 characters.';
         elseif (q('SELECT 1 FROM users WHERE username = ?', [$name])->fetch()) $err = 'That username is taken.';
@@ -253,6 +254,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_SESSION['sv'] = (int)$u['sess'] + 1;       // keep this device signed in, drop the others
             if ($u['email'] !== '') send_mail($u['email'], 'Your ' . $CFG['site_name'] . ' password was changed', "Hi @{$u['username']},\n\nYour password was just changed and other devices were signed out. If this was not you, reset your password right away: " . site_url() . "/?p=forgot\n");
             flash('Password changed. Other devices were signed out.', 'ok'); go('?p=account');
+        }
+        if ($do === 'username') {
+            $nn = trim((string)($_POST['username'] ?? ''));
+            if (!preg_match('/^[A-Za-z0-9_]{3,15}$/', $nn)) { flash('Username: 3-15 letters, numbers or underscores.'); go('?p=account'); }
+            if ($nn === $u['username']) { flash('That is already your username.'); go('?p=account'); }
+            if (reserved_name($nn) && strcasecmp($nn, $u['username']) !== 0) { flash('That username is reserved.'); go('?p=account'); }
+            if (q('SELECT 1 FROM users WHERE username = ? AND id != ?', [$nn, $u['id']])->fetch()) { flash('That username is taken.'); go('?p=account'); }
+            if (time() - (int)$u['renamed_at'] < 30 * 86400 && (int)$u['renamed_at'] > 0) { flash('You can change your username once every 30 days.'); go('?p=account'); }
+            q('UPDATE users SET username = ?, renamed_at = ? WHERE id = ?', [$nn, time(), $u['id']]);
+            flash('You are now @' . $nn . '.', 'ok'); go('?p=account');
         }
         if ($do === 'email') {
             $ne = strtolower(trim((string)($_POST['email'] ?? '')));

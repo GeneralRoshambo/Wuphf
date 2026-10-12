@@ -3,10 +3,15 @@
 // Loaded at the end of lib.php, so everything in lib.php is available here.
 
 // ---- Who can see what -----------------------------------------------------
+function admin_names(): array { global $CFG; return array_map('strtolower', (array)$CFG['admins']); }
+
+/** An admin is a listed username whose email address is confirmed. */
 function is_admin(?array $u): bool {
-    global $CFG;
-    return $u && in_array(strtolower($u['username']), array_map('strtolower', (array)$CFG['admins']), true);
+    return $u && (int)$u['email_ok'] === 1 && in_array(strtolower($u['username']), admin_names(), true);
 }
+
+/** Usernames in the admin list cannot be claimed by new sign-ups or renames, so nobody can grab one before its owner does. */
+function reserved_name(string $name): bool { return in_array(strtolower($name), admin_names(), true); }
 
 /** The viewer's own block / mute choices: user id => 'block' | 'mute'. */
 function relations_of(?array $viewer): array {
@@ -222,6 +227,14 @@ function page_account(array $u): void {
 <label>Repeat the new password <input type="password" name="new2" required minlength="8" autocomplete="new-password"></label>
 <button class="btn">Change password</button>
 <p class="hint">This also signs you out everywhere else.</p>
+</form>
+<form method="post" action="?p=account" class="card">
+<h2>Change username</h2>
+<input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="do" value="username">
+<p class="hint">Now: <b>@<?= h($u['username']) ?></b>. You can change it once every 30 days. Your old name becomes free for others, and old @mentions of it will no longer point to you.<?= is_admin($u) ? ' <b>You are an admin:</b> admin rights follow the username listed in config.local.php, so list the new name there too.' : '' ?></p>
+<label>New username <input name="username" required maxlength="15" pattern="[A-Za-z0-9_]{3,15}" autocomplete="off"></label>
+<label>Your password <input type="password" name="current" required autocomplete="current-password"></label>
+<button class="btn">Change username</button>
 </form>
 <form method="post" action="?p=account" class="card">
 <h2>Change email</h2>
