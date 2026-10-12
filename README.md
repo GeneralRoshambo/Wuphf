@@ -14,6 +14,10 @@ Sign up / log in, post (140 chars), delete own posts, follow / unfollow, "Follow
 
 Requirements: Apache with `.htaccess` (the stock cPanel setup), PHP 8.1+.
 
+## Install as an app (PWA)
+Wuphf is an installable web app: a manifest, icons and a service worker are included. Browsers only offer "Install" / "Add to Home Screen" over **HTTPS**, so enable the free AutoSSL certificate in cPanel and use the `https://` address. If you host in a subfolder, it works as-is because all paths are relative.
+The service worker caches only static files (CSS, JS, icons). Pages are always fetched live, so nothing personal is stored on the device; offline, a small "You're offline" page is shown. After changing static files, bump `V` in `sw.js` so installed copies refresh.
+
 ## Security notes
 - `data/` (the database) is blocked from the web by `.htaccess`. If your host ignores `.htaccess`, move `data/` above `public_html` and change `db_file` in `config.php`.
 - Passwords are hashed, forms are CSRF-protected, all output is escaped, and uploaded photos are re-encoded to 128×128 JPEGs.

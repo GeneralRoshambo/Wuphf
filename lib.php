@@ -150,6 +150,12 @@ function page_head(string $title): void {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= h($title) ?> · <?= h($CFG['site_name']) ?></title>
 <link rel="stylesheet" href="assets/style.css">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#1d6fb8">
+<link rel="icon" type="image/png" href="assets/icons/icon-192.png">
+<link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Wuphf">
 </head><body>
 <header><div class="wrap"><a class="logo" href="./"><?= h($CFG['site_name']) ?></a><nav>
 <?php if ($u): ?>
