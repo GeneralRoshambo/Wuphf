@@ -300,6 +300,18 @@ function render_tree(int $rootId, ?array $viewer): void {
     $walk($rootId, 1);
 }
 
+/** Open one nested level per ancestor (root first) so the page reads as a single tree.
+ *  Call chain_close() with the returned count after printing the focus post and replies. */
+function chain_open(array $chain, ?array $viewer): int {
+    foreach ($chain as $i => $r) {
+        echo '<div class="tc' . ($i >= 4 ? ' flatc' : '') . '">';
+        render_posts([$r], $viewer, true);
+        echo '<div class="tcin">';
+    }
+    return count($chain);
+}
+function chain_close(int $n): void { echo str_repeat('</div></div>', $n); }
+
 /** Tab bar. $tabs = [key => label]; links keep $base and set tab=key. */
 function tab_bar(array $tabs, string $cur, string $base): void {
     echo '<div class="tabs">';

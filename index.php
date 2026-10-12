@@ -141,13 +141,14 @@ case 'status':
     }
     page_head('@' . $post['username'] . ': ' . mb_substr($post['body'], 0, 30));
     echo '<p class="crumb"><a href="javascript:history.back()">&larr; Back</a></p>';
-    render_posts($chain, $u, true);
+    $depth = chain_open($chain, $u);
     echo '<div class="focus">'; render_posts([$post], $u, true); echo '</div>';
     echo '<div id="reply">';
     if ($u) compose_box($id, '@' . $post['username'] . ' ');
     else echo '<p class="empty"><a href="?p=login">Log in</a> to reply.</p>';
     echo '</div>';
     render_tree($id, $u);
+    chain_close($depth);
     page_foot(); break;
 
 case 'tag':

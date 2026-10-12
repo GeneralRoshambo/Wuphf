@@ -73,3 +73,9 @@ header .wrap{height:auto;min-height:52px}
 .tparent .post{margin-bottom:0;border-radius:0}.tparent>.post:first-child{border-radius:10px 10px 0 0}
 .tparent .post:last-child{border-bottom-style:dashed}
 @media (prefers-reduced-motion:reduce){.tkids>summary::before{transition:none}}
+
+/* ancestors above the focused post: one connected tree */
+.tc>.post{margin-bottom:8px;opacity:.92}
+.tcin{margin-left:12px;padding-left:10px;border-left:2px solid #e1e8ed}
+.flatc>.tcin{margin-left:0;padding-left:0;border-left:0}
+.tcin>.focus{margin-bottom:8px}

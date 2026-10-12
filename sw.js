@@ -1,6 +1,6 @@
 // Wuphf service worker. Caches only static assets; pages always come from the
 // network (they are per-user), with a small offline page as the fallback.
-const V = 'wuphf-v4';
+const V = 'wuphf-v5';
 const STATIC = ['assets/style.css', 'assets/app.js', 'assets/icons/icon-192.png', 'offline.html'];
 
 self.addEventListener('install', e => {
