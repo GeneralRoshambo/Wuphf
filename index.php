@@ -43,13 +43,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $body  = clean((string)($_POST['body'] ?? ''));
         $reply = (int)($_POST['reply_to'] ?? 0);
         $back  = $reply ? '?p=status&id=' . $reply : './';
-        $last  = (int)q('SELECT MAX(created) FROM posts WHERE user_id = ?', [$u['id']])->fetchColumn();
+        $wait  = cooldown_left($u);
         if ($reply && !q('SELECT 1 FROM posts WHERE id = ?', [$reply])->fetch()) { flash('That post no longer exists.'); go('./'); }
         if ($body === '') flash('Say something first.');
         elseif (len($body) > hard_max() || counted_len($body) > $CFG['max_chars'])
             flash('Too long: ' . $CFG['max_chars'] . ' characters max (@usernames are free).');
         elseif (has_link($body)) flash('Links are not allowed.');
-        elseif (time() - $last < $CFG['min_post_gap']) flash('Slow down a moment.');
+        elseif ($wait > 0) flash('Easy there. You can post again in ' . $wait . ' second' . ($wait == 1 ? '' : 's') . '.');
         else {
             q('INSERT INTO posts (user_id, body, reply_to, created) VALUES (?,?,?,?)', [$u['id'], $body, $reply ?: null, time()]);
             $id = (int)db()->lastInsertId();
@@ -122,7 +122,11 @@ case 'user':
 <?php if ($isF): ?><input type="hidden" name="unfollow" value="1"><button class="btn alt">Unfollow</button>
 <?php else: ?><button class="btn">Follow</button><?php endif; ?></form>
 <?php elseif ($u): ?><a class="btn alt" href="?p=settings">Edit profile</a><?php endif; ?></div></section>
-<?php feed('p.user_id = ?', [$prof['id']], 'p=user&amp;u=' . h($prof['username']) . '&amp;', 'No posts yet.');
+<?php $ptab = ($_GET['tab'] ?? '') === 'replies' ? 'replies' : 'posts';
+    $base = 'p=user&amp;u=' . h($prof['username']) . '&amp;';
+    tab_bar(['posts' => 'Posts', 'replies' => 'Replies'], $ptab, $base);
+    if ($ptab === 'replies') feed('p.reply_to IS NOT NULL AND p.user_id = ?', [$prof['id']], $base . 'tab=replies&amp;', 'No replies yet.', true);
+    else feed('p.reply_to IS NULL AND p.user_id = ?', [$prof['id']], $base, 'No posts yet.');
     page_foot(); break;
 
 case 'status':
@@ -135,7 +139,6 @@ case 'status':
         if (!$cur) break;
         array_unshift($chain, $cur);
     }
-    $replies = q(POST_SELECT . ' WHERE p.reply_to = ? ORDER BY p.id ASC LIMIT 200', [$id])->fetchAll();
     page_head('@' . $post['username'] . ': ' . mb_substr($post['body'], 0, 30));
     echo '<p class="crumb"><a href="javascript:history.back()">&larr; Back</a></p>';
     render_posts($chain, $u, true);
@@ -144,7 +147,7 @@ case 'status':
     if ($u) compose_box($id, '@' . $post['username'] . ' ');
     else echo '<p class="empty"><a href="?p=login">Log in</a> to reply.</p>';
     echo '</div>';
-    render_posts($replies, $u, true);
+    render_tree($id, $u);
     page_foot(); break;
 
 case 'tag':
@@ -196,20 +199,27 @@ case 'public':
     page_head('Public feed'); ?>
 <h1>Public feed</h1>
 <p class="sub">Everything posted on <?= h($CFG['site_name']) ?>, newest first. <?php if (!$u): ?><a href="?p=register">Join in</a>.<?php endif; ?></p>
-<?php feed('1=1', [], 'p=public&amp;', 'No posts yet.');
+<?php $ptab = ($_GET['tab'] ?? '') === 'replies' ? 'replies' : 'posts';
+    tab_bar(['posts' => 'Posts', 'replies' => 'Replies'], $ptab, 'p=public&amp;');
+    if ($ptab === 'replies') feed('p.reply_to IS NOT NULL', [], 'p=public&amp;tab=replies&amp;', 'No replies yet.', true);
+    else feed('p.reply_to IS NULL', [], 'p=public&amp;', 'No posts yet.');
     page_foot(); break;
 
 default: // home
-    $tab = ($u && ($_GET['tab'] ?? 'following') !== 'all') ? 'following' : 'all';
+    $tab = $_GET['tab'] ?? 'following';
+    if (!in_array($tab, ['following', 'all', 'replies'], true) || !$u) $tab = $u ? 'following' : 'all';
     page_head('Home');
     if ($u) {
-        compose_box(); ?>
-<div class="tabs"><a href="./" class="<?= $tab === 'following' ? 'on' : '' ?>">Following</a>
-<a href="?tab=all" class="<?= $tab === 'all' ? 'on' : '' ?>">Everyone</a></div>
-<?php } else { echo '<p class="hero">Short thoughts. 140 characters. No links, no noise. <a href="?p=register">Join in</a>.</p>'; }
-    if ($tab === 'following') {
-        feed('p.user_id = ?1 OR p.user_id IN (SELECT followee FROM follows WHERE follower = ?1)', [$u['id']], '',
+        compose_box();
+        tab_bar(['following' => 'Following', 'all' => 'Everyone', 'replies' => 'Replies'], $tab, '');
+    } else echo '<p class="hero">Short thoughts. 140 characters. No links, no noise. <a href="?p=register">Join in</a>.</p>';
+    if ($tab === 'replies') {
+        echo '<p class="sub">Conversations you are in: replies to your posts and your own replies.</p>';
+        feed('p.reply_to IS NOT NULL AND (p.user_id = ?1 OR p.reply_to IN (SELECT id FROM posts WHERE user_id = ?1))', [$u['id']],
+             'tab=replies&amp;', 'No replies yet. Reply to someone, or wait for a reply to your posts.', true);
+    } elseif ($tab === 'following') {
+        feed('p.reply_to IS NULL AND (p.user_id = ?1 OR p.user_id IN (SELECT followee FROM follows WHERE follower = ?1))', [$u['id']], '',
              'Nothing here yet. Post something, or follow people from the Everyone tab.');
-    } else feed('1=1', [], $u ? 'tab=all&amp;' : '');
+    } else feed('p.reply_to IS NULL', [], $u ? 'tab=all&amp;' : '');
     page_foot();
 }

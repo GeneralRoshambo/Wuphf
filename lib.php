@@ -210,16 +210,70 @@ const POST_SELECT = 'SELECT p.*, u.id AS uid, u.username, u.avatar_v, u.avatar_e
     (SELECT u2.username FROM posts pp JOIN users u2 ON u2.id = pp.user_id WHERE pp.id = p.reply_to) AS reply_user
     FROM posts p JOIN users u ON u.id = p.user_id';
 
-/** Run a feed query ($where uses ? placeholders) with keyset pagination and print it. */
-function feed(string $where, array $args, string $qs, string $empty = 'No posts yet.'): void {
+/** Run a feed query ($where uses ? placeholders) with keyset pagination and print it.
+ *  $threads shows each reply under the post it answers. */
+function feed(string $where, array $args, string $qs, string $empty = 'No posts yet.', bool $threads = false): void {
     global $CFG;
     $per = (int)$CFG['per_page'];
     $before = (int)($_GET['before'] ?? 0);
     $cur = $before > 0 ? ' AND p.id < ' . $before : '';
     $rows = q(POST_SELECT . " WHERE ($where)$cur ORDER BY p.id DESC LIMIT " . ($per + 1), $args)->fetchAll();
-    render_posts(array_slice($rows, 0, $per), me());
+    $show = array_slice($rows, 0, $per);
+    if ($threads) render_reply_threads($show, me()); else render_posts($show, me());
     if (!$rows) echo '<p class="empty">' . h($empty) . '</p>';
     if (count($rows) > $per) echo '<p class="more"><a href="?' . $qs . 'before=' . (int)$rows[$per - 1]['id'] . '">Older &rarr;</a></p>';
+}
+
+/** Replies tab: each reply is drawn under its parent, joined by a thread line. */
+function render_reply_threads(array $replies, ?array $viewer): void {
+    $ids = array_values(array_unique(array_filter(array_column($replies, 'reply_to'))));
+    $parents = [];
+    if ($ids) {
+        $in = implode(',', array_map('intval', $ids));
+        foreach (q(POST_SELECT . " WHERE p.id IN ($in)")->fetchAll() as $r) $parents[$r['id']] = $r;
+    }
+    foreach ($replies as $r) {
+        echo '<div class="tpair">';
+        if (isset($parents[$r['reply_to']])) { echo '<div class="tparent">'; render_posts([$parents[$r['reply_to']]], $viewer, true); echo '</div>'; }
+        echo '<div class="tchild">'; render_posts([$r], $viewer, true); echo '</div></div>';
+    }
+}
+
+/** Full conversation under a post, nested. Loads up to 300 descendants, 8 levels deep. */
+function render_tree(int $rootId, ?array $viewer): void {
+    $ids = q('WITH RECURSIVE t(id, d) AS (SELECT id, 1 FROM posts WHERE reply_to = ?
+              UNION ALL SELECT p.id, t.d + 1 FROM posts p JOIN t ON p.reply_to = t.id WHERE t.d < 8)
+              SELECT id FROM t LIMIT 300', [$rootId])->fetchAll(PDO::FETCH_COLUMN);
+    if (!$ids) return;
+    $kids = [];
+    foreach (q(POST_SELECT . ' WHERE p.id IN (' . implode(',', array_map('intval', $ids)) . ') ORDER BY p.id')->fetchAll() as $r) {
+        $kids[(int)$r['reply_to']][] = $r;
+    }
+    $walk = function (int $parent, int $depth) use (&$walk, $kids, $viewer) {
+        foreach ($kids[$parent] ?? [] as $r) {
+            echo '<div class="tnode' . ($depth >= 5 ? ' flat' : '') . '">';
+            render_posts([$r], $viewer, true);
+            if (!empty($kids[(int)$r['id']])) { echo '<div class="tkids">'; $walk((int)$r['id'], $depth + 1); echo '</div>'; }
+            echo '</div>';
+        }
+    };
+    $walk($rootId, 1);
+}
+
+/** Tab bar. $tabs = [key => label]; links keep $base and set tab=key. */
+function tab_bar(array $tabs, string $cur, string $base): void {
+    echo '<div class="tabs">';
+    foreach ($tabs as $k => $label) {
+        echo '<a href="?' . $base . 'tab=' . h($k) . '" class="' . ($cur === $k ? 'on' : '') . '">' . h($label) . '</a>';
+    }
+    echo '</div>';
+}
+
+function cooldown_left(?array $u): int {
+    global $CFG;
+    if (!$u) return 0;
+    $last = (int)q('SELECT MAX(created) FROM posts WHERE user_id = ?', [$u['id']])->fetchColumn();
+    return max(0, (int)$CFG['min_post_gap'] - (time() - $last));
 }
 
 function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
@@ -278,12 +332,14 @@ function page_head(string $title): void {
 function page_foot(): void { echo "</main><script src=\"assets/app.js\"></script></body></html>"; }
 
 function compose_box(int $replyTo = 0, string $prefill = ''): void {
-    global $CFG; ?>
+    global $CFG;
+    $prompts = require __DIR__ . '/prompts.php';
+    $ph = $replyTo ? 'Write your reply' : $prompts[array_rand($prompts)]; ?>
 <form method="post" action="?p=post" class="compose" id="<?= $replyTo ? 'reply' : 'compose' ?>">
 <input type="hidden" name="csrf" value="<?= csrf() ?>">
 <?php if ($replyTo): ?><input type="hidden" name="reply_to" value="<?= $replyTo ?>"><?php endif; ?>
 <textarea name="body" id="body" rows="<?= $replyTo ? 2 : 3 ?>" maxlength="<?= hard_max() ?>"
- placeholder="<?= $replyTo ? 'Write your reply' : "What's happening? (plain text, no links)" ?>" required><?= h($prefill) ?></textarea>
-<div class="row"><span id="count" data-max="<?= (int)$CFG['max_chars'] ?>" data-free="<?= (int)$CFG['free_mentions'] ?>"><?= (int)$CFG['max_chars'] ?></span><button class="btn"><?= $replyTo ? 'Reply' : 'Wuphf' ?></button></div>
+ placeholder="<?= h($ph) ?>" required><?= h($prefill) ?></textarea>
+<div class="row"><span class="hintkey">Enter to send</span><span id="count" data-max="<?= (int)$CFG['max_chars'] ?>" data-free="<?= (int)$CFG['free_mentions'] ?>" data-cd="<?= cooldown_left(me()) ?>" data-gap="<?= (int)$CFG['min_post_gap'] ?>"><?= (int)$CFG['max_chars'] ?></span><button class="btn" id="sendbtn" data-label="<?= $replyTo ? 'Reply' : 'Wuphf' ?>"><?= $replyTo ? 'Reply' : 'Wuphf' ?></button></div>
 </form><?php
 }
