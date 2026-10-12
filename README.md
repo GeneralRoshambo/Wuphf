@@ -8,9 +8,28 @@ Sign up / log in, post (140 chars; the first 5 @usernames in a post don't count)
 
 Links are blocked in posts and bios. The single profile link field is the only place a URL is allowed; it is shown with `rel="nofollow ugc"`.
 
+## Safety, moderation and admin
+- **Block and mute** (three-dot menu on posts and profiles). Blocking removes follows both ways and stops the person following, replying to, or reacting to you; you stop seeing each other's posts. Muting just hides their posts from your feeds, silently. Manage both from **Settings > Account**.
+- **Reports:** "Report post" or "Report account". Reports go to a private queue at `/?p=admin`; set `admin_email` to also get an email for each one.
+- **Admins** are listed by username in `config.local.php` on the server (this file is never overwritten by deploys):
+  ```php
+  <?php return ['admins' => ['yourusername'], 'admin_email' => 'you@example.com', 'contact_email' => 'you@example.com'];
+  ```
+  Admins can remove reported posts, suspend or restore accounts (suspended people are signed out at once and their posts are hidden), delete accounts, and download a database backup.
+- **Rules and Privacy** pages live in `pages.php`. They are a plain-language starting point; have them reviewed for your situation.
+
+## Backups
+The whole site is one file, `data/wuphf.sqlite`. Two ways to protect it:
+1. **Automatic copies on the server.** In cPanel > **Cron Jobs**, add a daily job: `/usr/local/bin/php /home/YOURUSER/public_html/backup.php` (adjust the path). It keeps the newest 14 copies in `data/backups/` (blocked from the web). cPanel's own account backups include them.
+2. **Off-server copy.** As an admin, open `/?p=admin&tab=backup` and download one now and then.
+
+## Notifications, bookmarks and more
+Replies, mentions, likes, reposts and follows appear under the bell icon (with an unread count). Bookmarks are in the three-dot menu and the bookmark icon. Also included: a friendly 404 page, RSS (`/?p=rss`, or `&u=name` for one person), trending hashtags, "who to follow" suggestions, and `robots.txt`.
+
 ## Accounts and email
 - Sign-up asks for an email and sends a confirmation link. Unconfirmed accounts can read but cannot post or follow.
 - "Forgot your password?" emails a one-time link that expires in 1 hour. Using it also confirms the email, and it cancels every other outstanding link and code.
+- Account page (**Settings > Account**): change password (signs out other devices), change email (confirmed at the new address first), download your data, delete your account.
 - Optional two-step login: members turn on "Ask for a login code by email" in Settings, or set `force_2fa` in `config.php` for everyone. Codes are 6 digits, last 10 minutes, and allow 5 tries.
 - Sign-up, login, reset and resend are rate limited. Tokens are stored hashed. Reset and confirm pages need a button press, so email link scanners cannot use them up.
 - Email is sent with PHP `mail()` from `mail_from` in `config.php`. In cPanel, open **Email Deliverability** and make sure the domain shows valid SPF and DKIM, or messages will land in spam. To test without sending, set `mail_mode` to `log` and read `data/outbox.log`.

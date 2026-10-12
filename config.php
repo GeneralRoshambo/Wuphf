@@ -12,6 +12,9 @@ $config = [
     'mail_mode'    => getenv('WUPHF_MAIL_MODE') ?: 'mail',   // 'mail' = PHP mail(); 'log' = write to data/outbox.log (testing)
     'require_confirm' => true,       // unconfirmed accounts cannot post or follow
     'force_2fa'    => false,         // true = everyone with a confirmed email gets a login code
+    'admins'       => [],            // usernames allowed to use the admin pages, e.g. ['wuphf'] (set in config.local.php)
+    'admin_email'  => '',            // optional: get an email when someone reports a post or account
+    'contact_email'=> '',            // optional: shown on the Rules and Privacy pages
     'min_post_gap' => 5,             // seconds a user must wait between posts
 ];
 

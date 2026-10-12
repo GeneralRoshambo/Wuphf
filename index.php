@@ -21,8 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         else {
             q('INSERT INTO users (username, pass, email, created) VALUES (?,?,?,?)', [$name, password_hash($pw, PASSWORD_DEFAULT), $email, time()]);
             $nu = q('SELECT * FROM users WHERE id = ?', [(int)db()->lastInsertId()])->fetch();
-            session_regenerate_id(true);
-            $_SESSION['uid'] = (int)$nu['id'];
+            sign_in($nu);
             if (send_confirmation($nu)) flash('Welcome! We sent a confirmation link to ' . $email . '. Open it to start posting.', 'ok');
             else flash('Account created, but the confirmation email could not be sent. Use "Resend link" in a moment.');
             go('./');
@@ -35,14 +34,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $row = q('SELECT * FROM users WHERE username = ? OR (email <> \'\' AND lower(email) = lower(?))', [trim($_POST['username'] ?? ''), trim($_POST['username'] ?? '')])->fetch();
         $hash = $row['pass'] ?? '$2y$10$usesomesillystringforsaltuMHQxZfC8m1GkF0n2vGX5bKq6x1b2e';
         if (password_verify((string)($_POST['password'] ?? ''), $hash) && $row) {
+            if ((int)$row['is_suspended']) { flash('This account is suspended. See the Rules page.'); go('?p=login'); }
             if ($row['email'] !== '' && (int)$row['email_ok'] && ((int)$row['twofa'] || $CFG['force_2fa'])) {
                 $_SESSION['pending'] = ['uid' => (int)$row['id'], 't' => time()];
                 if (send_login_code($row)) go('?p=verify');
                 unset($_SESSION['pending']);
                 flash('We could not email your login code. Try again in a moment.'); go('?p=login');
             }
-            session_regenerate_id(true);
-            $_SESSION['uid'] = (int)$row['id'];
+            sign_in($row);
             go('./');
         }
         q('INSERT INTO throttle (k, t) VALUES (?,?)', ['login:' . $ip, time()]);
@@ -62,8 +61,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$tok || (int)$tok['attempts'] >= 5) { unset($_SESSION['pending']); flash('That code expired. Log in again.'); go('?p=login'); }
         if (hash_equals($tok['hash'], hash('sha256', $code))) {
             burn_token((int)$tok['id']);
-            session_regenerate_id(true);
-            $_SESSION['uid'] = (int)$pend['uid']; unset($_SESSION['pending']);
+            unset($_SESSION['pending']);
+            if (!$pu || (int)$pu['is_suspended']) { flash('This account is suspended. See the Rules page.'); go('?p=login'); }
+            sign_in($pu);
             go('./');
         }
         q('UPDATE tokens SET attempts = attempts + 1 WHERE id = ?', [$tok['id']]);
@@ -89,13 +89,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pw = (string)($_POST['password'] ?? '');
         if (strlen($pw) < 8) { flash('Password must be at least 8 characters.'); go('?p=reset&t=' . urlencode($_POST['t'])); }
         if ($pw !== (string)($_POST['password2'] ?? '')) { flash('The two passwords do not match.'); go('?p=reset&t=' . urlencode($_POST['t'])); }
-        q('UPDATE users SET pass = ?, email_ok = 1 WHERE id = ?', [password_hash($pw, PASSWORD_DEFAULT), $tok['user_id']]);
+        q('UPDATE users SET pass = ?, email_ok = 1, sess = sess + 1 WHERE id = ?', [password_hash($pw, PASSWORD_DEFAULT), $tok['user_id']]);
         q('UPDATE tokens SET used = 1 WHERE user_id = ?', [$tok['user_id']]);   // every outstanding link and code
         flash('Password updated. Log in with your new password.', 'ok'); go('?p=login');
 
     case 'confirm':
-        $tok = find_token((string)($_POST['t'] ?? ''), 'confirm');
+        $raw = (string)($_POST['t'] ?? '');
+        $tok = find_token($raw, 'confirm') ?: find_token($raw, 'email');
         if (!$tok) { flash('That confirmation link is invalid or has expired. Log in and use "Resend link".'); go('./'); }
+        if ($tok['kind'] === 'email') {
+            $cu = q('SELECT * FROM users WHERE id = ?', [$tok['user_id']])->fetch();
+            try { q("UPDATE users SET email = pending_email, pending_email = '', email_ok = 1 WHERE id = ? AND pending_email <> ''", [$tok['user_id']]); }
+            catch (Throwable $e) { burn_token((int)$tok['id']); flash('That email address is now used by another account.'); go('./'); }
+            burn_token((int)$tok['id']);
+            flash('Email updated.', 'ok'); go('./');
+        }
         q('UPDATE users SET email_ok = 1 WHERE id = ?', [$tok['user_id']]);
         burn_token((int)$tok['id']);
         flash('Email confirmed. You can post now.', 'ok'); go('./');
@@ -123,7 +131,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $reply = (int)($_POST['reply_to'] ?? 0);
         $back  = $reply ? '?p=status&id=' . $reply : './';
         $wait  = cooldown_left($u);
-        if ($reply && !q('SELECT 1 FROM posts WHERE id = ?', [$reply])->fetch()) { flash('That post no longer exists.'); go('./'); }
+        $parent = $reply ? q('SELECT id, user_id FROM posts WHERE id = ?', [$reply])->fetch() : null;
+        if ($reply && !$parent) { flash('That post no longer exists.'); go('./'); }
+        if ($parent && blocked_between((int)$u['id'], (int)$parent['user_id'])) { flash('You cannot reply to this account.'); go($back); }
         if ($body === '') flash('Say something first.');
         elseif (len($body) > hard_max() || counted_len($body) > $CFG['max_chars'])
             flash('Too long: ' . $CFG['max_chars'] . ' characters max (@usernames are free).');
@@ -133,6 +143,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             q('INSERT INTO posts (user_id, body, reply_to, created) VALUES (?,?,?,?)', [$u['id'], $body, $reply ?: null, time()]);
             $id = (int)db()->lastInsertId();
             foreach (extract_tags($body) as $t) q('INSERT OR IGNORE INTO post_tags (post_id, tag) VALUES (?,?)', [$id, $t]);
+            $told = [];
+            if ($parent) { notify((int)$parent['user_id'], (int)$u['id'], 'reply', $id); $told[(int)$parent['user_id']] = true; }
+            preg_match_all(MENTION_RE, $body, $mm);
+            foreach (array_slice(array_unique(array_map(fn($x) => strtolower(trim($x, '@ ')), $mm[0])), 0, (int)$CFG['free_mentions']) as $name) {
+                $mu = q('SELECT id FROM users WHERE username = ?', [$name])->fetch();
+                if ($mu && empty($told[(int)$mu['id']])) { notify((int)$mu['id'], (int)$u['id'], 'mention', $id); $told[(int)$mu['id']] = true; }
+            }
             if ($reply) flash('Reply posted.', 'ok');
         }
         go($back);
@@ -144,6 +161,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $ajax = !empty($_POST['ajax']);
         if (!$row) { if ($ajax) json_out(['error' => 'gone'], 404); flash('That post is gone.'); go('./'); }
         if ($row['repost_of']) $pid = (int)$row['repost_of'];            // always act on the original
+        $author = (int)q('SELECT user_id FROM posts WHERE id = ?', [$pid])->fetchColumn();
+        if ($author && blocked_between((int)$u['id'], $author)) { if ($ajax) json_out(['error' => 'blocked'], 403); flash('You cannot interact with this account.'); go($_SERVER['HTTP_REFERER'] ?? './'); }
         if (!rate_ok($route . ':' . $u['id'], 120, 3600)) { if ($ajax) json_out(['error' => 'slow'], 429); flash('Slow down a little.'); go($_SERVER['HTTP_REFERER'] ?? './'); }
         if ($route === 'react') {
             $v = (int)($_POST['v'] ?? 0);
@@ -151,9 +170,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cur = q('SELECT val FROM reactions WHERE user_id = ? AND post_id = ?', [$u['id'], $pid])->fetchColumn();
             if ($cur !== false && (int)$cur === $v) q('DELETE FROM reactions WHERE user_id = ? AND post_id = ?', [$u['id'], $pid]);   // same button again: undo
             else q('INSERT OR REPLACE INTO reactions (user_id, post_id, val, created) VALUES (?,?,?,?)', [$u['id'], $pid, $v, time()]);
+            unnotify($author, (int)$u['id'], 'like', $pid);
+            if ($v === 1 && !($cur !== false && (int)$cur === 1)) notify($author, (int)$u['id'], 'like', $pid);
         } else {
-            if (q('SELECT 1 FROM posts WHERE user_id = ? AND repost_of = ?', [$u['id'], $pid])->fetch()) q('DELETE FROM posts WHERE user_id = ? AND repost_of = ?', [$u['id'], $pid]);
-            else q("INSERT INTO posts (user_id, body, repost_of, created) VALUES (?, '', ?, ?)", [$u['id'], $pid, time()]);
+            if (q('SELECT 1 FROM posts WHERE user_id = ? AND repost_of = ?', [$u['id'], $pid])->fetch()) { q('DELETE FROM posts WHERE user_id = ? AND repost_of = ?', [$u['id'], $pid]); unnotify($author, (int)$u['id'], 'repost', $pid); }
+            else { q("INSERT INTO posts (user_id, body, repost_of, created) VALUES (?, '', ?, ?)", [$u['id'], $pid, time()]); notify($author, (int)$u['id'], 'repost', $pid); }
         }
         if ($ajax) json_out(post_state($pid, $u));
         go(($_SERVER['HTTP_REFERER'] ?? './') . '#p' . $pid);
@@ -165,12 +186,117 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     case 'follow':
         $t = (int)($_POST['id'] ?? 0);
         if ($t !== (int)$u['id'] && q('SELECT 1 FROM users WHERE id = ?', [$t])->fetch()) {
-            if (!empty($_POST['unfollow'])) q('DELETE FROM follows WHERE follower = ? AND followee = ?', [$u['id'], $t]);
-            else q('INSERT OR IGNORE INTO follows (follower, followee) VALUES (?,?)', [$u['id'], $t]);
+            if (!empty($_POST['unfollow'])) { q('DELETE FROM follows WHERE follower = ? AND followee = ?', [$u['id'], $t]); unnotify($t, (int)$u['id'], 'follow'); }
+            elseif (blocked_between((int)$u['id'], $t)) { flash('You cannot follow this account.'); go($_SERVER['HTTP_REFERER'] ?? './'); }
+            elseif (q('INSERT OR IGNORE INTO follows (follower, followee) VALUES (?,?)', [$u['id'], $t])->rowCount()) notify($t, (int)$u['id'], 'follow');
         }
         if (!empty($_POST['ajax'])) { http_response_code(204); exit; }
         $at = (int)($_POST['at'] ?? 0);
         go(($_SERVER['HTTP_REFERER'] ?? './') . ($at ? '#p' . $at : ''));
+
+    case 'rel':     // block / mute and their undo
+        $t = (int)($_POST['id'] ?? 0); $do = (string)($_POST['do'] ?? '');
+        $tu = q('SELECT username FROM users WHERE id = ?', [$t])->fetch();
+        if (!$tu || $t === (int)$u['id'] || !in_array($do, ['block', 'unblock', 'mute', 'unmute'], true)) go($_SERVER['HTTP_REFERER'] ?? './');
+        $have = q('SELECT kind FROM relations WHERE user_id = ? AND target_id = ?', [$u['id'], $t])->fetchColumn();
+        if ($do === 'block') {
+            q("INSERT OR REPLACE INTO relations (user_id, target_id, kind, created) VALUES (?,?,'block',?)", [$u['id'], $t, time()]);
+            q('DELETE FROM follows WHERE (follower = ?1 AND followee = ?2) OR (follower = ?2 AND followee = ?1)', [$u['id'], $t]);
+            flash('Blocked @' . $tu['username'] . '. They can no longer follow, reply to or react to your posts, and you will not see theirs.', 'ok');
+        } elseif ($do === 'mute') {
+            if ($have !== 'block') q("INSERT OR REPLACE INTO relations (user_id, target_id, kind, created) VALUES (?,?,'mute',?)", [$u['id'], $t, time()]);
+            flash('Muted @' . $tu['username'] . '. You will not see their posts. They are not told.', 'ok');
+        } else {
+            q('DELETE FROM relations WHERE user_id = ? AND target_id = ? AND kind = ?', [$u['id'], $t, $do === 'unblock' ? 'block' : 'mute']);
+            flash(($do === 'unblock' ? 'Unblocked @' : 'Unmuted @') . $tu['username'] . '.', 'ok');
+        }
+        go($_SERVER['HTTP_REFERER'] ?? './');
+
+    case 'bookmark':
+        $bid = (int)($_POST['id'] ?? 0);
+        if (q('SELECT 1 FROM posts WHERE id = ?', [$bid])->fetch()) {
+            if (q('SELECT 1 FROM bookmarks WHERE user_id = ? AND post_id = ?', [$u['id'], $bid])->fetch()) q('DELETE FROM bookmarks WHERE user_id = ? AND post_id = ?', [$u['id'], $bid]);
+            else q('INSERT INTO bookmarks (user_id, post_id, created) VALUES (?,?,?)', [$u['id'], $bid, time()]);
+        }
+        go(($_SERVER['HTTP_REFERER'] ?? './') . '#p' . $bid);
+
+    case 'report':
+        $reasons = ['Spam or scam', 'Harassment or bullying', 'Hate or threats', 'Pretending to be someone else', 'Sexual or graphic content', 'Illegal activity', 'Something else'];
+        $rp = (int)($_POST['post'] ?? 0); $ru = (int)($_POST['user'] ?? 0);
+        $reason = (string)($_POST['reason'] ?? '');
+        if (!in_array($reason, $reasons, true)) { flash('Choose a reason.'); go($_SERVER['HTTP_REFERER'] ?? './'); }
+        if (!rate_ok('report:' . $u['id'], 10, 3600)) { flash('You have sent a lot of reports. Try again later.'); go('./'); }
+        if ($rp) {
+            $tp = q('SELECT p.id, p.body, p.user_id, u.username FROM posts p JOIN users u ON u.id = p.user_id WHERE p.id = ?', [$rp])->fetch();
+            if (!$tp) { flash('That post is gone.'); go('./'); }
+            $snap = $tp['body']; $tname = $tp['username']; $ru = 0;
+        } else {
+            $tp = q('SELECT id, username, bio FROM users WHERE id = ?', [$ru])->fetch();
+            if (!$tp) { flash('No such account.'); go('./'); }
+            $snap = $tp['bio']; $tname = $tp['username'];
+        }
+        if (($rp && (int)$tp['user_id'] === (int)$u['id']) || (!$rp && $ru === (int)$u['id'])) { flash('You cannot report yourself.'); go('./'); }
+        q('INSERT INTO reports (reporter_id, post_id, user_id, reason, note, snapshot, target_name, created) VALUES (?,?,?,?,?,?,?,?)',
+          [$u['id'], $rp ?: null, $ru ?: null, $reason, mb_substr(clean((string)($_POST['note'] ?? '')), 0, 300), $snap, $tname, time()]);
+        if ($CFG['admin_email'] !== '') send_mail($CFG['admin_email'], 'New report on ' . $CFG['site_name'], "@{$u['username']} reported " . ($rp ? 'a post' : 'an account') . " by @$tname: $reason\n\n" . site_url() . "/?p=admin\n");
+        flash('Thanks. A moderator will look at it. You can also mute or block this account from its menu.', 'ok'); go('./');
+
+    case 'account':
+        $do = (string)($_POST['do'] ?? '');
+        if ($do === 'export') export_data($u);
+        if (!password_verify((string)($_POST['current'] ?? ''), $u['pass'])) { flash('Your current password is not right.'); go('?p=account'); }
+        if ($do === 'password') {
+            $new = (string)($_POST['new'] ?? '');
+            if (strlen($new) < 8) { flash('The new password must be at least 8 characters.'); go('?p=account'); }
+            if ($new !== (string)($_POST['new2'] ?? '')) { flash('The two new passwords do not match.'); go('?p=account'); }
+            q('UPDATE users SET pass = ?, sess = sess + 1 WHERE id = ?', [password_hash($new, PASSWORD_DEFAULT), $u['id']]);
+            $_SESSION['sv'] = (int)$u['sess'] + 1;       // keep this device signed in, drop the others
+            if ($u['email'] !== '') send_mail($u['email'], 'Your ' . $CFG['site_name'] . ' password was changed', "Hi @{$u['username']},\n\nYour password was just changed and other devices were signed out. If this was not you, reset your password right away: " . site_url() . "/?p=forgot\n");
+            flash('Password changed. Other devices were signed out.', 'ok'); go('?p=account');
+        }
+        if ($do === 'email') {
+            $ne = strtolower(trim((string)($_POST['email'] ?? '')));
+            if (!filter_var($ne, FILTER_VALIDATE_EMAIL) || strlen($ne) > 120) { flash('Enter a valid email address.'); go('?p=account'); }
+            if (q('SELECT 1 FROM users WHERE lower(email) = ? AND id != ?', [$ne, $u['id']])->fetch()) { flash('That email already has an account.'); go('?p=account'); }
+            if (!rate_ok('emailchg:' . $u['id'], 5, 3600)) { flash('Too many tries. Wait a while.'); go('?p=account'); }
+            q('UPDATE users SET pending_email = ? WHERE id = ?', [$ne, $u['id']]);
+            $raw = make_token((int)$u['id'], 'email', 86400);
+            send_mail($ne, 'Confirm your new email for ' . $CFG['site_name'], "Hi @{$u['username']},\n\nConfirm this as your new email address:\n\n" . site_url() . "/?p=confirm&t=$raw\n\nThe link works once and expires in 24 hours. If you did not ask for this, ignore it.\n");
+            if ($u['email'] !== '') send_mail($u['email'], 'Email change requested on ' . $CFG['site_name'], "Someone (hopefully you) asked to change this account's email to $ne. Nothing changes until that address is confirmed. If this was not you, change your password.\n");
+            flash('We sent a confirmation link to ' . $ne . '. Your email changes when you open it.', 'ok'); go('?p=account');
+        }
+        if ($do === 'delete') {
+            if (strcasecmp(trim((string)($_POST['typed'] ?? '')), $u['username']) !== 0) { flash('Type your username exactly to confirm.'); go('?p=account'); }
+            if (is_admin($u)) { flash('Remove yourself from the admins list in config.local.php before deleting this account.'); go('?p=account'); }
+            delete_user((int)$u['id']);
+            $_SESSION = []; session_destroy();
+            session_start(); flash('Your account was deleted.', 'ok'); go('./');
+        }
+        go('?p=account');
+
+    case 'admin':
+        if (!is_admin($u)) { http_response_code(403); exit('Not allowed'); }
+        $do = (string)($_POST['do'] ?? '');
+        $rid = (int)($_POST['rid'] ?? 0);
+        $done = fn() => $rid ? q("UPDATE reports SET status = ?, handled_by = ?, handled_at = ? WHERE id = ?", [$do === 'dismiss' ? 'dismissed' : 'resolved', $u['username'], time(), $rid]) : null;
+        if ($do === 'backup') {
+            $tmp = dirname($CFG['db_file']) . '/backup-' . bin2hex(random_bytes(6)) . '.sqlite';
+            if (!backup_to($tmp)) { flash('Could not create a backup.'); go('?p=admin&tab=backup'); }
+            header('Content-Type: application/octet-stream');
+            header('Content-Disposition: attachment; filename="wuphf-backup-' . date('Ymd-His') . '.sqlite"');
+            header('Content-Length: ' . filesize($tmp)); readfile($tmp); @unlink($tmp); exit;
+        }
+        if ($do === 'remove_post') { q('DELETE FROM posts WHERE id = ?', [(int)($_POST['pid'] ?? 0)]); $done(); flash('Post removed.', 'ok'); }
+        elseif ($do === 'suspend' || $do === 'unsuspend') {
+            $tid = (int)($_POST['uid'] ?? 0); $tt = q('SELECT * FROM users WHERE id = ?', [$tid])->fetch();
+            if ($tt && !is_admin($tt)) { q('UPDATE users SET is_suspended = ?, sess = sess + 1 WHERE id = ?', [$do === 'suspend' ? 1 : 0, $tid]); $done(); flash(($do === 'suspend' ? 'Suspended @' : 'Restored @') . $tt['username'] . '.', 'ok'); }
+        }
+        elseif ($do === 'delete_user') {
+            $tid = (int)($_POST['uid'] ?? 0); $tt = q('SELECT * FROM users WHERE id = ?', [$tid])->fetch();
+            if ($tt && !is_admin($tt)) { delete_user($tid); flash('Deleted @' . $tt['username'] . '.', 'ok'); }
+        }
+        elseif ($do === 'dismiss' || $do === 'resolve') { $done(); flash($do === 'dismiss' ? 'Report dismissed.' : 'Marked as handled.', 'ok'); }
+        go($_SERVER['HTTP_REFERER'] ?? '?p=admin');
 
     case 'settings':
         $bio = clean((string)($_POST['bio'] ?? ''));
@@ -235,7 +361,7 @@ case 'reset':
 <?php page_foot(); break;
 
 case 'confirm':
-    $tok = find_token((string)($_GET['t'] ?? ''), 'confirm');
+    $tok = find_token((string)($_GET['t'] ?? ''), 'confirm') ?: find_token((string)($_GET['t'] ?? ''), 'email');
     page_head('Confirm email');
     if (!$tok) { echo '<h1>Link expired</h1><p class="empty">That confirmation link is invalid or has expired. Log in and choose "Resend link".</p>'; page_foot(); break; } ?>
 <h1>Confirm your email</h1>
@@ -265,7 +391,11 @@ case 'verify':
 
 case 'user':
     $prof = q('SELECT * FROM users WHERE username = ?', [$_GET['u'] ?? ''])->fetch();
-    if (!$prof) { http_response_code(404); page_head('Not found'); echo '<h1>No such user</h1>'; page_foot(); break; }
+    if (!$prof) not_found('No such account', 'There is no account with that username.');
+    if ((int)$prof['is_suspended'] && !is_admin($u)) not_found('Account suspended', 'This account was suspended for breaking the Rules.');
+    $myrel = $u ? (relations_of($u)[(int)$prof['id']] ?? null) : null;
+    $theyBlocked = $u && q("SELECT 1 FROM relations WHERE user_id = ? AND target_id = ? AND kind = 'block'", [$prof['id'], $u['id']])->fetch();
+    if ($myrel === 'mute') $GLOBALS['WUPHF_SHOW'] = (int)$prof['id'];     // a muted profile still shows its posts to you
     $nPosts = (int)q('SELECT COUNT(*) FROM posts WHERE user_id = ?', [$prof['id']])->fetchColumn();
     $nFollowing = (int)q('SELECT COUNT(*) FROM follows WHERE follower = ?', [$prof['id']])->fetchColumn();
     $nFollowers = (int)q('SELECT COUNT(*) FROM follows WHERE followee = ?', [$prof['id']])->fetchColumn();
@@ -278,11 +408,23 @@ case 'user':
 <?php if ($prof['website'] !== ''): ?><p class="site"><a href="<?= h($prof['website']) ?>" target="_blank" rel="nofollow noopener noreferrer ugc"><?= h(preg_replace('~^https?://(www\.)?~i', '', rtrim($prof['website'], '/'))) ?></a></p><?php endif; ?>
 <p class="stats"><b><?= $nPosts ?></b> posts · <b><?= $nFollowing ?></b> following · <b><?= $nFollowers ?></b> followers</p>
 <?php if ($u && (int)$u['id'] !== (int)$prof['id']): ?>
-<form method="post" action="?p=follow"><input type="hidden" name="csrf" value="<?= csrf() ?>">
+<?php if ($myrel === 'block'): ?><p class="hint">You blocked this account.</p>
+<?php elseif ($theyBlocked): ?><p class="hint">@<?= h($prof['username']) ?> has blocked you.</p>
+<?php else: ?>
+<form method="post" action="?p=follow" class="inl"><input type="hidden" name="csrf" value="<?= csrf() ?>">
 <input type="hidden" name="id" value="<?= (int)$prof['id'] ?>">
 <?php if ($isF): ?><input type="hidden" name="unfollow" value="1"><button class="btn alt">Unfollow</button>
 <?php else: ?><button class="btn">Follow</button><?php endif; ?></form>
-<?php elseif ($u): ?><a class="btn alt" href="?p=settings">Edit profile</a><?php endif; ?></div></section>
+<?php endif; ?>
+<details class="menu pmenu"><summary aria-label="More options" title="More"><?= icon('more') ?></summary><div class="pop">
+<?php foreach ([[$myrel === 'mute' ? 'unmute' : 'mute', $myrel === 'mute' ? 'Unmute' : 'Mute', ''], [$myrel === 'block' ? 'unblock' : 'block', $myrel === 'block' ? 'Unblock' : 'Block', $myrel === 'block' ? '' : 'They will no longer see or interact with your posts.']] as [$do, $lab, $conf]): ?>
+<form method="post" action="?p=rel"<?= $conf ? ' onsubmit="return confirm(\'' . h($lab . ' @' . $prof['username'] . '? ' . $conf) . '\')"' : '' ?>><input type="hidden" name="csrf" value="<?= csrf() ?>"><input type="hidden" name="id" value="<?= (int)$prof['id'] ?>"><input type="hidden" name="do" value="<?= $do ?>"><button><?= $lab ?> @<?= h($prof['username']) ?></button></form>
+<?php endforeach; ?>
+<a href="?p=report&amp;user=<?= (int)$prof['id'] ?>">Report account</a>
+</div></details>
+<?php elseif ($u): ?><a class="btn alt" href="?p=settings">Edit profile</a><?php endif; ?>
+<?php if ($myrel === 'mute'): ?><p class="hint">You muted this account. Their posts are hidden from your feeds but shown here.</p><?php endif; ?>
+</div></section>
 <?php $ptab = ($_GET['tab'] ?? '') === 'replies' ? 'replies' : 'posts';
     $base = 'p=user&amp;u=' . h($prof['username']) . '&amp;';
     tab_bar(['posts' => 'Posts', 'replies' => 'Replies'], $ptab, $base);
@@ -293,7 +435,7 @@ case 'user':
 case 'status':
     $id = (int)($_GET['id'] ?? 0);
     $post = q(POST_SELECT . ' WHERE p.id = ?', [$id])->fetch();
-    if (!$post) { http_response_code(404); page_head('Not found'); echo '<h1>That post is gone</h1>'; page_foot(); break; }
+    if (!$post) not_found('That post is gone', 'It may have been deleted.');
     if ($post['repost_of']) go('?p=status&id=' . (int)$post['repost_of']);   // a repost's page is the original's
     $chain = []; $cur = $post;
     for ($i = 0; $i < 10 && $cur['reply_to']; $i++) {
@@ -340,6 +482,7 @@ case 'search':
         echo '<h2>Posts</h2>';
         feed("p.body LIKE ? ESCAPE '\\'", [$like], 'p=search&amp;q=' . h(urlencode($qs)) . '&amp;', 'No posts match "' . $qs . '".');
     }
+    if ($qs === '') { render_trending(); if ($u) render_suggestions($u); }
     page_foot(); break;
 
 case 'settings':
@@ -362,19 +505,49 @@ Ask for a login code by email each time I log in</label>
 <input type="text" inputmode="url" autocapitalize="off" name="website" value="<?= h($u['website']) ?>" maxlength="100" placeholder="https://example.com"></label>
 <button class="btn" id="savebtn">Save</button>
 </form>
+<p class="hint"><a href="?p=account">Password, email, your data and deleting your account &rarr;</a></p>
 <?php page_foot(); break;
+
+case 'notifications':
+    if (!$u) go('?p=login');
+    page_notifications($u); break;
+
+case 'bookmarks':
+    if (!$u) go('?p=login');
+    page_bookmarks($u); break;
+
+case 'report':
+    if (!$u) go('?p=login');
+    page_report($u); break;
+
+case 'account':
+    if (!$u) go('?p=login');
+    page_account($u); break;
+
+case 'admin':
+    if (!is_admin($u)) not_found();
+    page_admin($u); break;
+
+case 'page':
+    page_static((string)($_GET['n'] ?? '')); break;
+
+case 'rss':
+    rss_feed();
 
 case 'public':
     page_head('Public feed'); ?>
 <h1>Public feed</h1>
 <p class="sub">Everything posted on <?= h($CFG['site_name']) ?>, newest first. <?php if (!$u): ?><a href="?p=register">Join in</a>.<?php endif; ?></p>
+<?php render_trending(); ?>
 <?php $ptab = ($_GET['tab'] ?? '') === 'replies' ? 'replies' : 'posts';
     tab_bar(['posts' => 'Posts', 'replies' => 'Replies'], $ptab, 'p=public&amp;');
     if ($ptab === 'replies') feed('p.reply_to IS NOT NULL', [], 'p=public&amp;tab=replies&amp;', 'No replies yet.', true);
     else feed('p.reply_to IS NULL', [], 'p=public&amp;', 'No posts yet.');
     page_foot(); break;
 
-default: // home
+default:
+    if ($route !== 'home') not_found();
+    // home
     $tab = $_GET['tab'] ?? 'following';
     if (!in_array($tab, ['following', 'all', 'replies'], true) || !$u) $tab = $u ? 'following' : 'all';
     page_head('Home');
@@ -388,7 +561,8 @@ default: // home
              'tab=replies&amp;', 'No replies yet. Reply to someone, or wait for a reply to your posts.', true);
     } elseif ($tab === 'following') {
         feed('p.reply_to IS NULL AND (p.user_id = ?1 OR p.user_id IN (SELECT followee FROM follows WHERE follower = ?1))', [$u['id']], '',
-             'Nothing here yet. Post something, or follow people from the Everyone tab.');
+             'Nothing here yet. Post something, or follow some people below.');
+        if (!(int)q('SELECT COUNT(*) FROM follows WHERE follower = ?', [$u['id']])->fetchColumn()) render_suggestions($u);
     } else feed('p.reply_to IS NULL', [], $u ? 'tab=all&amp;' : '');
     page_foot();
 }

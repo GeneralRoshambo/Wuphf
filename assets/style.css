@@ -182,3 +182,49 @@ button.act[data-kind=like].on svg,button.act[data-kind=dislike].on svg{fill:curr
 .rpby svg{width:14px;height:14px}.rpby a{color:var(--mute);font-weight:600}
 #toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,16px);background:var(--fg);color:var(--surface);padding:9px 16px;border-radius:999px;font-size:.88rem;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:20}
 #toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* menus, notifications, trending, admin, account */
+.menu{position:relative}
+.menu>summary{list-style:none;cursor:pointer;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;color:var(--mute)}
+.menu>summary::-webkit-details-marker{display:none}
+.menu>summary:hover,.menu[open]>summary{background:var(--chip);color:var(--fg)}
+.menu svg{width:18px;height:18px;fill:currentColor;stroke:none}
+.phd .menu{margin-left:auto}.phd .delf + .menu{margin-left:0}
+.menu .pop{position:absolute;right:0;top:32px;z-index:6;min-width:190px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:6px;box-shadow:0 8px 28px rgba(0,0,0,.18)}
+.menu .pop form{margin:0}
+.menu .pop button,.menu .pop a{display:block;width:100%;text-align:left;padding:9px 12px;border:0;background:none;border-radius:8px;font:inherit;font-size:.9rem;color:var(--fg);cursor:pointer}
+.menu .pop button:hover,.menu .pop a:hover{background:var(--chip);text-decoration:none}
+.pmenu{display:inline-block;vertical-align:middle;margin-left:6px}
+.pmenu .pop{right:auto;left:0}
+.nbell{position:relative}
+.badge{position:absolute;top:0;right:-2px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--accent);color:var(--accent-ink);font-size:.65rem;font-weight:700;line-height:16px;text-align:center}
+.notif{display:flex;gap:12px;padding:14px 0;border-bottom:1px solid var(--line);color:inherit}
+.notif:hover{text-decoration:none;background:color-mix(in srgb,var(--chip) 50%,transparent)}
+.notif.unread{box-shadow:inset 3px 0 0 var(--accent);padding-left:12px}
+.notif .nb{min-width:0}.notif .t{margin-left:6px}
+.notif .snip{display:block;color:var(--mute);font-size:.88rem;overflow-wrap:anywhere}
+.trend{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 0 4px}
+.trend .lab{font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;color:var(--mute);font-weight:600;margin-right:2px}
+.chip{display:inline-flex;gap:6px;align-items:baseline;padding:5px 11px;border-radius:999px;background:var(--chip);font-size:.85rem;font-weight:500}
+.chip:hover{text-decoration:none;background:var(--line)}.chip small{color:var(--mute)}
+.person .pname{flex:1;min-width:0;color:inherit}.person .pname:hover{text-decoration:none}
+.person .fol{margin-left:auto}
+.prose{max-width:62ch}.prose h2{text-transform:none;letter-spacing:0;font-size:1.05rem;color:var(--fg);margin:22px 0 6px}
+.prose li{margin:4px 0}.prose a{color:var(--accent)}
+select{display:block;width:100%;margin-top:6px;padding:11px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--fg);font:inherit}
+.btn.sm{padding:5px 12px;font-size:.8rem}
+.dangerbtn,.btn.dangerbtn{background:var(--bad);color:#fff;border-color:var(--bad)}
+.card.danger{border-top:1px solid var(--line);margin-top:8px}
+.card h2{margin:0 0 10px}
+.rep,.arow{padding:14px 0;border-bottom:1px solid var(--line)}
+.arow{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.rhead{margin-bottom:4px}.rbody blockquote{margin:6px 0;padding:6px 12px;border-left:3px solid var(--line);color:var(--mute);overflow-wrap:anywhere}
+.ractions{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.arow .ractions{margin:0}
+.pill{font-size:.7rem;padding:2px 8px;border-radius:999px;background:var(--chip);color:var(--mute);font-weight:600}.pill.bad{background:var(--bad);color:#fff}
+.flinks{display:flex;gap:16px;justify-content:center;margin-bottom:6px}
+@media (max-width:520px){
+  .bar{gap:6px 8px}
+  .nav{gap:0 9px;font-size:.82rem;margin-left:auto}
+  .nav .icon-btn{width:30px;height:30px}
+  .logo{font-size:1.3rem}
+}

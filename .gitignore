@@ -1,3 +1,6 @@
-data/*.sqlite
 avatars/*.jpg
 config.local.php
+data/*.sqlite
+data/backup-*.sqlite
+data/backups/
+data/outbox.log

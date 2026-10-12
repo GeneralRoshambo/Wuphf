@@ -22,6 +22,9 @@ function db(): PDO {
         email TEXT NOT NULL DEFAULT \'\',
         email_ok INTEGER NOT NULL DEFAULT 0,
         twofa INTEGER NOT NULL DEFAULT 0,
+        is_suspended INTEGER NOT NULL DEFAULT 0,
+        sess INTEGER NOT NULL DEFAULT 0,
+        pending_email TEXT NOT NULL DEFAULT \'\',
         avatar_v INTEGER NOT NULL DEFAULT 0,
         avatar_ext TEXT NOT NULL DEFAULT \'jpg\',
         created INTEGER NOT NULL)');
@@ -37,7 +40,8 @@ function db(): PDO {
     if (!in_array('website', $have('users')))    $pdo->exec('ALTER TABLE users ADD COLUMN website TEXT NOT NULL DEFAULT \'\'');
     if (!in_array('avatar_ext', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN avatar_ext TEXT NOT NULL DEFAULT \'jpg\'');
     if (!in_array('reply_to', $have('posts')))   $pdo->exec('ALTER TABLE posts ADD COLUMN reply_to INTEGER REFERENCES posts(id) ON DELETE SET NULL');
-    foreach (['email TEXT NOT NULL DEFAULT \'\'', 'email_ok INTEGER NOT NULL DEFAULT 0', 'twofa INTEGER NOT NULL DEFAULT 0'] as $def) {
+    foreach (['email TEXT NOT NULL DEFAULT \'\'', 'email_ok INTEGER NOT NULL DEFAULT 0', 'twofa INTEGER NOT NULL DEFAULT 0',
+              'is_suspended INTEGER NOT NULL DEFAULT 0', 'sess INTEGER NOT NULL DEFAULT 0', 'pending_email TEXT NOT NULL DEFAULT \'\''] as $def) {
         if (!in_array(strtok($def, ' '), $have('users'))) $pdo->exec("ALTER TABLE users ADD COLUMN $def");
     }
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(lower(email)) WHERE email <> \'\'');
@@ -65,6 +69,34 @@ function db(): PDO {
         tag TEXT NOT NULL,
         PRIMARY KEY (post_id, tag))');
     $pdo->exec('CREATE INDEX IF NOT EXISTS tags_tag ON post_tags(tag, post_id)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS relations (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        target_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL, created INTEGER NOT NULL,
+        PRIMARY KEY (user_id, target_id))');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS relations_target ON relations(target_id)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reporter_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        post_id INTEGER, user_id INTEGER,
+        reason TEXT NOT NULL, note TEXT NOT NULL DEFAULT \'\',
+        snapshot TEXT NOT NULL DEFAULT \'\', target_name TEXT NOT NULL DEFAULT \'\',
+        status TEXT NOT NULL DEFAULT \'open\', handled_by TEXT NOT NULL DEFAULT \'\',
+        created INTEGER NOT NULL, handled_at INTEGER NOT NULL DEFAULT 0)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS reports_status ON reports(status, id)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        actor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE,
+        is_read INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)');
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS notif_once ON notifications(user_id, actor_id, kind, COALESCE(post_id, 0))');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS notif_user ON notifications(user_id, id)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS bookmarks (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+        created INTEGER NOT NULL, PRIMARY KEY (user_id, post_id))');
     $pdo->exec('CREATE TABLE IF NOT EXISTS follows (
         follower INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         followee INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -175,9 +207,18 @@ function me(): ?array {
     if ($u === false) {
         $u = empty($_SESSION['uid']) ? null
             : (q('SELECT * FROM users WHERE id = ?', [$_SESSION['uid']])->fetch() ?: null);
-        if (!$u) unset($_SESSION['uid']);
+        // Suspended accounts, and sessions from before a password change, are signed out.
+        if ($u && ((int)$u['is_suspended'] || (int)($_SESSION['sv'] ?? 0) !== (int)$u['sess'])) $u = null;
+        if (!$u) { unset($_SESSION['uid']); }
     }
     return $u;
+}
+
+/** Start a logged-in session for $row. */
+function sign_in(array $row): void {
+    session_regenerate_id(true);
+    $_SESSION['uid'] = (int)$row['id'];
+    $_SESSION['sv'] = (int)$row['sess'];
 }
 
 function csrf(): string {
@@ -532,6 +573,9 @@ const ICONS = [
     'down'  => '<path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>',
     'repeat'=> '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
     'share' => '<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>',
+    'bell'  => '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+    'bookmark' => '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+    'more'  => '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
     'sun'   => '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     'moon'  => '<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/>',
 ];
@@ -548,13 +592,14 @@ function following_ids(?array $viewer): array {
 
 /** What the viewer has done to these posts: reaction (1 / -1) and reposts. */
 function viewer_state(?array $viewer, array $ids): array {
-    $react = []; $reposted = [];
+    $react = []; $reposted = []; $marks = [];
     if ($viewer && $ids) {
         $in = implode(',', array_map('intval', $ids));
         foreach (q("SELECT post_id, val FROM reactions WHERE user_id = ? AND post_id IN ($in)", [$viewer['id']])->fetchAll() as $r) $react[(int)$r['post_id']] = (int)$r['val'];
         foreach (q("SELECT repost_of FROM posts WHERE user_id = ? AND repost_of IN ($in)", [$viewer['id']])->fetchAll(PDO::FETCH_COLUMN) as $id) $reposted[(int)$id] = true;
+        foreach (q("SELECT post_id FROM bookmarks WHERE user_id = ? AND post_id IN ($in)", [$viewer['id']])->fetchAll(PDO::FETCH_COLUMN) as $id) $marks[(int)$id] = true;
     }
-    return [$react, $reposted];
+    return [$react, $reposted, $marks];
 }
 
 /** Fresh counts and the viewer's own state for one post, as sent back to the page after a click. */
@@ -591,7 +636,8 @@ function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
     if ($origIds) foreach (q(POST_SELECT . ' WHERE p.id IN (' . implode(',', array_map('intval', $origIds)) . ')')->fetchAll() as $o) $orig[(int)$o['id']] = $o;
     $shown = [];
     foreach ($rows as $r) $shown[] = $r['repost_of'] ? (int)$r['repost_of'] : (int)$r['id'];
-    [$react, $reposted] = viewer_state($viewer, $shown);
+    [$react, $reposted, $marks] = viewer_state($viewer, $shown);
+    $hide = visible_hidden($viewer);
 
     foreach ($rows as $row) {
         $by = null; $p = $row;
@@ -599,6 +645,8 @@ function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
             if (!isset($orig[(int)$row['repost_of']])) continue;
             $p = $orig[(int)$row['repost_of']]; $by = $row['username'];
         }
+        // Skip posts from people the viewer blocked or muted, who blocked them, or who are suspended.
+        if (in_array((int)$p['user_id'], $hide, true) || in_array((int)$row['user_id'], $hide, true)) continue;
         $pid = (int)$p['id'];
         echo '<article class="post" id="p' . (int)$row['id'] . '">';
         echo '<a href="?p=user&amp;u=' . h($p['username']) . '">' . avatar($p, 40) . '</a>';
@@ -616,6 +664,7 @@ function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
                 . '<input type="hidden" name="csrf" value="' . csrf() . '"><input type="hidden" name="id" value="' . (int)$row['id']
                 . '"><button class="lnk del" title="Delete">' . ($by !== null ? 'undo' : 'delete') . '</button></form>';
         }
+        echo post_menu($p, $viewer, isset($marks[$pid]));
         echo '</div>';
         if ($p['reply_to'] && $p['reply_user'] && !$thread) {
             echo '<div class="rl">Replying to <a href="?p=status&amp;id=' . (int)$p['reply_to'] . '">@' . h($p['reply_user']) . '</a></div>';
@@ -648,6 +697,7 @@ function page_head(string $title, array $meta = []): void {
 <meta name="twitter:card" content="summary">
 <link rel="stylesheet" href="assets/style.css?v=<?= asset_v('assets/style.css') ?>">
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="alternate" type="application/rss+xml" title="<?= h($CFG['site_name']) ?>" href="?p=rss">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)">
@@ -658,13 +708,16 @@ function page_head(string $title, array $meta = []): void {
 <meta name="apple-mobile-web-app-title" content="Wuphf">
 </head><body>
 <header><div class="bar"><a class="logo" href="./"><?= h($CFG['site_name']) ?></a><nav class="nav">
-<?php if ($u): ?>
 <a href="?p=public">Public</a>
+<?php if ($u): $unread = unread_count($u); ?>
+<a class="icon-btn nbell" href="?p=notifications" aria-label="Notifications<?= $unread ? ' (' . $unread . ' new)' : '' ?>" title="Notifications"><?= icon('bell') ?><?php if ($unread): ?><span class="badge"><?= $unread > 99 ? '99+' : $unread ?></span><?php endif; ?></a>
+<a class="icon-btn" href="?p=bookmarks" aria-label="Bookmarks" title="Bookmarks"><?= icon('bookmark') ?></a>
 <a href="?p=user&amp;u=<?= h($u['username']) ?>">@<?= h($u['username']) ?></a>
 <a href="?p=settings">Settings</a>
+<?php if (is_admin($u)): ?><a href="?p=admin">Admin</a><?php endif; ?>
 <form method="post" action="?p=logout" class="inl"><input type="hidden" name="csrf" value="<?= csrf() ?>"><button class="lnk">Log out</button></form>
 <?php else: ?>
-<a href="?p=public">Public</a> <a href="?p=login">Log in</a><?php if ($CFG['allow_signup']): ?> <a href="?p=register">Sign up</a><?php endif; ?>
+<a href="?p=login">Log in</a><?php if ($CFG['allow_signup']): ?> <a href="?p=register">Sign up</a><?php endif; ?>
 <?php endif; ?>
 <button type="button" class="icon-btn" id="theme" aria-label="Switch between light and dark mode" title="Light / dark"><?= icon('moon', 'moon') ?><?= icon('sun', 'sun') ?></button>
 </nav>
@@ -678,7 +731,7 @@ if (needs_confirm($u)): ?><div class="flash banner" role="status">Confirm your e
 }
 
 function page_foot(): void {
-    echo '</main><footer class="foot">Built by <a href="https://modularitynet.com" rel="nofollow noopener" target="_blank">Modularity Networks</a></footer>'
+    echo '</main><footer class="foot"><div class="flinks"><a href="?p=page&amp;n=rules">Rules</a><a href="?p=page&amp;n=privacy">Privacy</a><a href="?p=rss">RSS</a></div>Built by <a href="https://modularitynet.com" rel="nofollow noopener" target="_blank">Modularity Networks</a></footer>'
         . '<div id="toast" role="status" aria-live="polite"></div><script src="assets/app.js?v=' . asset_v('assets/app.js') . '"></script></body></html>';
 }
 
@@ -697,3 +750,5 @@ function compose_box(int $replyTo = 0, string $prefill = ''): void {
 </div>
 </form><?php
 }
+
+require __DIR__ . '/extras.php';

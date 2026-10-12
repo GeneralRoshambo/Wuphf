@@ -119,3 +119,11 @@ document.addEventListener('click', function (e) {
   if (navigator.share) { navigator.share({ title: document.title, text: b.dataset.text, url: url }).catch(function () {}); return; }
   copyText(url).then(function () { toast('Link copied'); }, function () { toast(url); });
 });
+
+// Close an open three-dot menu when you click elsewhere or press Escape.
+document.addEventListener('click', function (e) {
+  document.querySelectorAll('details.menu[open]').forEach(function (d) { if (!d.contains(e.target)) d.removeAttribute('open'); });
+});
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') document.querySelectorAll('details.menu[open]').forEach(function (d) { d.removeAttribute('open'); });
+});

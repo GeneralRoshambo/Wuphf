@@ -3,7 +3,7 @@ DirectoryIndex index.php
 <FilesMatch "\.(sqlite|db|md)$">
   Require all denied
 </FilesMatch>
-<FilesMatch "^(config|config\.local|lib)\.php$">
+<FilesMatch "^(config|config\.local|lib|extras|pages|prompts|backup)\.php$">
   Require all denied
 </FilesMatch>
 
