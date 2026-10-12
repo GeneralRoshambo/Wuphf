@@ -305,3 +305,17 @@ input.mini:not([type=hidden]):not([type=file]):not([type=checkbox]){width:9.5em;
 .seoform .card{margin-bottom:14px}
 .card label .hint{display:block;margin:0 0 4px;font-weight:400}
 .cms-head{margin:0 0 .6em}
+
+.replyd{margin:10px 0}
+.replyd>summary{list-style:none;cursor:pointer;display:inline-block;padding:7px 14px;border:1px solid var(--line,#8884);border-radius:999px;color:var(--accent,#1d5bff);font-weight:600;font-size:.9rem}
+.replyd>summary::-webkit-details-marker{display:none}
+.replyd[open]>summary{display:none}
+
+.edited{color:var(--mute);font-size:.8em}
+.editbox{margin:6px 0}
+.editbox>summary{cursor:pointer;color:var(--mute);font-size:.85rem;list-style:none}
+.editbox>summary::-webkit-details-marker{display:none}
+.editbox .ecd{font-variant-numeric:tabular-nums;color:var(--accent)}
+.editbox textarea{width:100%;box-sizing:border-box;font:inherit;background:var(--chip);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:8px;margin:6px 0}
+.editbox .row{display:flex;gap:8px;justify-content:flex-end;align-items:center}
+.editbox .ghost{background:transparent;color:var(--mute);border:1px solid var(--line)}

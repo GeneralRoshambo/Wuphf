@@ -123,7 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$u) go('?p=login');
 
-    if (in_array($route, ['post', 'follow', 'react', 'repost'], true) && needs_confirm($u)) {
+    if (in_array($route, ['post', 'edit', 'follow', 'react', 'repost'], true) && needs_confirm($u)) {
         flash('Confirm your email first. Use "Resend link" in the banner if you need a new one.');
         go($_SERVER['HTTP_REFERER'] ?? './');
     }
@@ -160,6 +160,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($mu && empty($told[(int)$mu['id']])) { notify((int)$mu['id'], (int)$u['id'], 'mention', $id); $told[(int)$mu['id']] = true; }
             }
             if ($reply) flash('Reply posted.', 'ok');
+        }
+        go($back);
+
+    case 'edit':
+        $pid  = (int)($_POST['id'] ?? 0);
+        $body = clean((string)($_POST['body'] ?? ''));
+        $row  = q('SELECT * FROM posts WHERE id = ? AND user_id = ? AND repost_of IS NULL', [$pid, $u['id']])->fetch();
+        $back = ($_SERVER['HTTP_REFERER'] ?? '') ?: './';
+        if (!$row) { flash('You can only edit your own posts.'); go($back); }
+        if (time() - (int)$row['created'] > (int)$CFG['edit_window'] + 5) { flash('The edit window has closed.'); go($back); }   // a few seconds of grace
+        if (!rate_ok('edit:' . $u['id'], 30, 3600)) { flash('Slow down a little.'); go($back); }
+        if ($body === '') flash('A post cannot be empty.');
+        elseif (len($body) > hard_max() || counted_len($body) > $CFG['max_chars'])
+            flash('Too long: ' . $CFG['max_chars'] . ' characters max (@usernames are free).');
+        elseif (has_link($body)) flash('Links are not allowed.');
+        elseif ($body === $row['body']) { go($back); }
+        else {
+            $oldM = [];
+            preg_match_all(MENTION_RE, $row['body'], $om); foreach ($om[0] as $x) $oldM[strtolower(trim($x, '@ '))] = true;
+            q('UPDATE posts SET body = ?, edited_at = ? WHERE id = ?', [$body, time(), $pid]);
+            q('DELETE FROM post_tags WHERE post_id = ?', [$pid]);
+            foreach (extract_tags($body) as $t) q('INSERT OR IGNORE INTO post_tags (post_id, tag) VALUES (?,?)', [$pid, $t]);
+            preg_match_all(MENTION_RE, $body, $mm);
+            foreach (array_slice(array_unique(array_map(fn($x) => strtolower(trim($x, '@ ')), $mm[0])), 0, (int)$CFG['free_mentions']) as $name) {
+                if (isset($oldM[$name])) continue;
+                $mu = q('SELECT id FROM users WHERE username = ?', [$name])->fetch();
+                if ($mu && (int)$mu['id'] !== (int)$u['id']) notify((int)$mu['id'], (int)$u['id'], 'mention', $pid);
+            }
+            flash('Post updated.', 'ok');
         }
         go($back);
 
@@ -494,10 +523,11 @@ case 'status':
     echo '<p class="crumb"><a class="back" href="./" data-back>&larr; Back</a></p>';
     $depth = chain_open($chain, $u);
     echo '<div class="focus">'; render_posts([$post], $u, true); echo '</div>';
-    echo '<div id="reply">';
-    if ($u) compose_box($id, '@' . $post['username'] . ' ');
-    else echo '<p class="empty"><a href="?p=login">Log in</a> to reply.</p>';
-    echo '</div>';
+    if ($u) {
+        echo '<details id="reply" class="replyd"><summary class="replyb">Reply to @' . h($post['username']) . '</summary>';
+        compose_box($id, '@' . $post['username'] . ' ');
+        echo '</details>';
+    } else echo '<div id="reply"><p class="empty"><a href="?p=login">Log in</a> to reply.</p></div>';
     render_tree($id, $u);
     chain_close($depth);
     page_foot(); break;

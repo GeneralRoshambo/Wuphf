@@ -140,3 +140,37 @@ document.addEventListener('click', function (e) {
     }
   } catch (x) {}
 });
+
+// Permalink reply box: collapsed by default, opens from the Reply icon (#reply) or on click.
+(function () {
+  var d = document.getElementById('reply');
+  if (!d || d.tagName !== 'DETAILS') return;
+  function focusBox() { var t = d.querySelector('textarea'); if (t) { t.focus(); var n = t.value.length; try { t.setSelectionRange(n, n); } catch (e) {} } }
+  function fromHash() { if (location.hash === '#reply') { d.open = true; focusBox(); } }
+  d.addEventListener('toggle', function () { if (d.open) focusBox(); });
+  window.addEventListener('hashchange', fromHash);
+  fromHash();
+})();
+
+// Edit window: live countdown, then the edit box disappears. Enter saves, Escape cancels.
+(function () {
+  var boxes = document.querySelectorAll('details.editbox');
+  if (!boxes.length) return;
+  var t0 = Date.now();
+  boxes.forEach(function (b) {
+    var left = parseInt(b.getAttribute('data-left'), 10) || 0, cd = b.querySelector('.ecd'), ta = b.querySelector('textarea');
+    var cancel = b.querySelector('.ecancel'), orig = ta.value, form = b.querySelector('form');
+    function tick() {
+      var r = left - Math.floor((Date.now() - t0) / 1000);
+      if (r <= 0) { b.remove(); clearInterval(iv); return; }
+      cd.textContent = Math.floor(r / 60) + ':' + ('0' + (r % 60)).slice(-2);
+    }
+    var iv = setInterval(tick, 1000); tick();
+    b.addEventListener('toggle', function () { if (b.open) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); } });
+    cancel.addEventListener('click', function () { ta.value = orig; b.open = false; });
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); }
+      else if (e.key === 'Escape') { ta.value = orig; b.open = false; }
+    });
+  });
+})();

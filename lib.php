@@ -58,6 +58,7 @@ function db(): PDO {
     $pdo->exec('CREATE INDEX IF NOT EXISTS throttle_k ON throttle(k, t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS posts_user ON posts(user_id, id)');
     if (!in_array('repost_of', $have('posts'))) $pdo->exec('ALTER TABLE posts ADD COLUMN repost_of INTEGER REFERENCES posts(id) ON DELETE CASCADE');
+    if (!in_array('edited_at', $have('posts'))) $pdo->exec('ALTER TABLE posts ADD COLUMN edited_at INTEGER');
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS reposts_once ON posts(user_id, repost_of) WHERE repost_of IS NOT NULL');
     $pdo->exec('CREATE TABLE IF NOT EXISTS reactions (
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -653,6 +654,12 @@ function json_out(array $d, int $code = 200): never {
     http_response_code($code); header('Content-Type: application/json'); echo json_encode($d); exit;
 }
 
+/** Seconds left in the author's edit window for a post (0 when closed). */
+function edit_left(array $p): int {
+    global $CFG;
+    return max(0, (int)($CFG['edit_window'] ?? 300) - (time() - (int)$p['created']));
+}
+
 function permalink(int $id): string { return site_url() . '/?p=status&id=' . $id; }
 
 /** One small action button: a form so it works without JavaScript, upgraded in place by app.js. */
@@ -689,7 +696,7 @@ function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
         echo '<a href="?p=user&amp;u=' . h($p['username']) . '">' . avatar($p, 40) . '</a>';
         echo '<div class="pb">';
         if ($by !== null) echo '<div class="rpby">' . icon('repeat') . '<a href="?p=user&amp;u=' . h($by) . '">@' . h($by) . '</a> reposted</div>';
-        echo '<div class="phd"><a class="un" href="?p=user&amp;u=' . h($p['username']) . '">@' . h($p['username']) . '</a> <a class="t" href="?p=status&amp;id=' . $pid . '">' . h(ago((int)$p['created'])) . '</a>';
+        echo '<div class="phd"><a class="un" href="?p=user&amp;u=' . h($p['username']) . '">@' . h($p['username']) . '</a> <a class="t" href="?p=status&amp;id=' . $pid . '">' . h(ago((int)$p['created'])) . '</a>' . (!empty($p['edited_at']) ? ' <span class="edited" title="Edited">edited</span>' : '');
         $author = (int)$p['user_id'];
         if ($viewer && $author !== (int)$viewer['id'] && !in_array($author, $following, true)) {
             echo '<form method="post" action="?p=follow" class="inl folf" data-uid="' . $author . '">'
@@ -707,6 +714,13 @@ function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
             echo '<div class="rl">Replying to <a href="?p=status&amp;id=' . (int)$p['reply_to'] . '">@' . h($p['reply_user']) . '</a></div>';
         }
         echo '<p>' . render_body($p['body']) . '</p>';
+        $left = ($by === null && $viewer && (int)$viewer['id'] === $author) ? edit_left($p) : 0;
+        if ($left > 0) {
+            echo '<details class="editbox" data-left="' . $left . '"><summary>Edit <span class="ecd">' . intdiv($left, 60) . ':' . sprintf('%02d', $left % 60) . '</span></summary>'
+                . '<form method="post" action="?p=edit" class="editf"><input type="hidden" name="csrf" value="' . csrf() . '"><input type="hidden" name="id" value="' . $pid . '">'
+                . '<textarea name="body" rows="3" maxlength="' . (int)hard_max() . '" data-max="' . (int)$GLOBALS['CFG']['max_chars'] . '" data-free="' . (int)$GLOBALS['CFG']['free_mentions'] . '">' . h($p['body']) . '</textarea>'
+                . '<div class="row"><span class="ecount"></span><button type="button" class="btn ghost ecancel">Cancel</button><button class="btn">Save</button></div></form></details>';
+        }
         $n = (int)$p['replies'];
         echo '<div class="acts"><a class="act" href="?p=status&amp;id=' . $pid . '#reply" aria-label="Reply" title="Reply">' . icon('reply') . '<span class="n">' . ($n ?: '') . '</span></a>'
             . act_button($viewer, 'repost', $pid, (int)$p['reposts'], isset($reposted[$pid]), 'Repost', 'repeat', 'repost')
@@ -728,7 +742,7 @@ function page_head(string $title, array $meta = []): void {
 <link rel="stylesheet" href="assets/style.css?v=<?= asset_v('assets/style.css') ?>">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="alternate" type="application/rss+xml" title="<?= h($CFG['site_name']) ?>" href="?p=rss">
-<meta name="wuphf-build" content="<?= h(build_id()) ?>">
+<?php if (is_admin($u)) echo '<meta name="wuphf-build" content="' . h(build_id()) . '">'; ?>
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)">
