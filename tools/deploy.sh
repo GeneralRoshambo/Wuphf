@@ -46,6 +46,10 @@ for d in $(find . -type f | sed 's|/[^/]*$||' | sort -u); do
   if [ "${DRY_RUN:-}" = 1 ]; then echo "[dry run] $target:$names"; continue; fi
   out="$("${CURL[@]}" "${args[@]}" "$BASE/execute/Fileman/upload_files")" || { echo "request failed for $target"; fail=1; continue; }
   if echo "$out" | grep -q '"status":1'; then echo "uploaded $n file(s) to $target"
+  elif echo "$out" | grep -qiE 'one moment, please|<html|<!doctype'; then
+    echo "The server answered with a web page (a bot-check or firewall), not the cPanel API."
+    echo "Try the server's own hostname or IP as CPANEL_HOST, or ask your host to allow this machine's IP."
+    fail=1; break
   else echo "cPanel rejected $target: $(echo "$out" | head -c 400)"; fail=1; fi
 done
 [ "$fail" = 0 ] || { echo "Deploy finished with errors."; exit 1; }
