@@ -1,0 +1,34 @@
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f3f5f7;color:#14171a}
+a{color:#1d6fb8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:600px;margin:0 auto;padding:0 16px}
+header{background:#fff;border-bottom:1px solid #e1e8ed;position:sticky;top:0;z-index:2}
+header .wrap{display:flex;justify-content:space-between;align-items:center;height:52px}
+.logo{font-weight:800;font-size:1.3rem;color:#1d6fb8}
+nav{display:flex;gap:14px;align-items:center;font-size:.9rem}
+.inl{display:inline;margin:0}
+.lnk{background:none;border:0;padding:0;color:#1d6fb8;font:inherit;cursor:pointer}
+.lnk:hover{text-decoration:underline}
+main{padding-top:16px;padding-bottom:40px}
+h1{font-size:1.3rem;margin:.2em 0 .6em}
+.flash{background:#fff7d6;border:1px solid #ecd36a;padding:8px 12px;border-radius:8px;margin-bottom:12px}
+.card,.compose,.post,.profile{background:#fff;border:1px solid #e1e8ed;border-radius:10px;padding:14px;margin-bottom:10px}
+.card label{display:block;margin-bottom:12px;font-size:.9rem;color:#555}
+input:not([type=hidden]):not([type=file]),textarea{display:block;width:100%;margin-top:4px;padding:9px;border:1px solid #ccd6dd;border-radius:8px;font:inherit}
+textarea{resize:vertical}
+.row{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:8px}
+#count{color:#657786}#count.warn{color:#c77700}#count.neg{color:#c00;font-weight:700}
+.btn{background:#1d6fb8;color:#fff;border:0;border-radius:20px;padding:8px 18px;font:inherit;font-weight:600;cursor:pointer}
+.btn.alt{background:#fff;color:#1d6fb8;border:1px solid #1d6fb8}
+.post{display:flex;gap:12px}
+.pb{min-width:0;flex:1}.pb p{margin:2px 0 0;overflow-wrap:anywhere}
+.un{font-weight:700;color:#14171a}.t{color:#657786;font-size:.85rem;margin-left:6px}
+.ph form{float:right}.ph .lnk{font-size:.8rem;color:#999}
+.av{border-radius:50%;object-fit:cover;display:block;flex:none}
+.av.ph{color:#fff;text-align:center;font-weight:700}
+.tabs{display:flex;margin:14px 0 10px;border-bottom:1px solid #e1e8ed}
+.tabs a{padding:8px 16px;color:#657786;font-weight:600}.tabs a.on{color:#14171a;border-bottom:3px solid #1d6fb8}
+.profile{display:flex;gap:16px;align-items:flex-start}.profile h1{margin:0}.profile p{margin:.3em 0}
+.stats{color:#657786;font-size:.9rem}
+.center{display:flex;justify-content:center;margin-bottom:12px}
+.empty,.hero{color:#657786;text-align:center;padding:20px 0}.more{text-align:center}
