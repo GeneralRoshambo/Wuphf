@@ -64,3 +64,16 @@
 if ('serviceWorker' in navigator && window.isSecureContext) {
   window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js'); });
 }
+
+// Follow buttons beside posts: follow in place, then drop every button for that person.
+document.addEventListener('submit', function (e) {
+  var f = e.target.closest ? e.target.closest('form.folf') : null;
+  if (!f || !window.fetch) return;
+  e.preventDefault();
+  var uid = f.dataset.uid, b = f.querySelector('button'), data = new FormData(f);
+  data.append('ajax', '1'); b.disabled = true; b.textContent = 'Following';
+  fetch(f.action, { method: 'POST', body: data, credentials: 'same-origin' }).then(function (r) {
+    if (!r.ok) throw 0;
+    document.querySelectorAll('form.folf[data-uid="' + uid + '"]').forEach(function (x) { x.remove(); });
+  }).catch(function () { b.disabled = false; b.textContent = 'Follow'; });
+});

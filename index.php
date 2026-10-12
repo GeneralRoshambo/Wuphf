@@ -68,7 +68,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!empty($_POST['unfollow'])) q('DELETE FROM follows WHERE follower = ? AND followee = ?', [$u['id'], $t]);
             else q('INSERT OR IGNORE INTO follows (follower, followee) VALUES (?,?)', [$u['id'], $t]);
         }
-        go($_SERVER['HTTP_REFERER'] ?? './');
+        if (!empty($_POST['ajax'])) { http_response_code(204); exit; }
+        $at = (int)($_POST['at'] ?? 0);
+        go(($_SERVER['HTTP_REFERER'] ?? './') . ($at ? '#p' . $at : ''));
 
     case 'settings':
         $bio = clean((string)($_POST['bio'] ?? ''));

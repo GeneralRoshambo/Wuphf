@@ -98,7 +98,7 @@ textarea{resize:vertical}
 .phd{display:flex;align-items:baseline;gap:8px}
 .un{font-weight:600;letter-spacing:-.01em}.un:hover{text-decoration:underline}
 .t{color:var(--mute);font-size:.82rem}
-.phd form{margin-left:auto}
+.phd .delf{margin-left:auto}
 .del{font-size:.78rem;opacity:.0;transition:opacity .12s}
 .post:hover .del,.del:focus-visible{opacity:1}
 @media (hover:none){.del{opacity:.7}}
@@ -151,3 +151,8 @@ main>.tnode,main>.tc,.thread{border-bottom:1px solid var(--line)}
   .col{min-height:calc(100vh - 110px)}
 }
 .compose textarea{height:3.4em;min-height:0}
+
+/* small follow button beside people you do not follow */
+.fol{font-size:.72rem;font-weight:600;line-height:1;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer;align-self:center}
+.fol:hover{background:var(--fg);color:var(--surface);border-color:var(--fg)}
+.fol:disabled{opacity:.5;cursor:default}

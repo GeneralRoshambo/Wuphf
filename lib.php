@@ -393,14 +393,28 @@ function icon(string $n, string $cls = ''): string {
     return '<svg class="' . $cls . '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' . ICONS[$n] . '</svg>';
 }
 
+/** Ids the viewer follows (one query per request). */
+function following_ids(?array $viewer): array {
+    static $ids = null;
+    if (!$viewer) return [];
+    return $ids ??= array_map('intval', q('SELECT followee FROM follows WHERE follower = ?', [$viewer['id']])->fetchAll(PDO::FETCH_COLUMN));
+}
+
 function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
+    $following = following_ids($viewer);
     foreach ($rows as $p) {
         echo '<article class="post" id="p' . (int)$p['id'] . '">';
         echo '<a href="?p=user&amp;u=' . h($p['username']) . '">' . avatar($p, 48) . '</a>';
         echo '<div class="pb"><div class="phd"><a class="un" href="?p=user&amp;u=' . h($p['username']) . '">@'
             . h($p['username']) . '</a> <a class="t" href="?p=status&amp;id=' . (int)$p['id'] . '">' . h(ago((int)$p['created'])) . '</a>';
+        $author = (int)$p['user_id'];
+        if ($viewer && $author !== (int)$viewer['id'] && !in_array($author, $following, true)) {
+            echo '<form method="post" action="?p=follow" class="inl folf" data-uid="' . $author . '">'
+                . '<input type="hidden" name="csrf" value="' . csrf() . '"><input type="hidden" name="id" value="' . $author
+                . '"><input type="hidden" name="at" value="' . (int)$p['id'] . '"><button class="fol" title="Follow @' . h($p['username']) . '">Follow</button></form>';
+        }
         if ($viewer && (int)$viewer['id'] === (int)$p['user_id']) {
-            echo '<form method="post" action="?p=delete" class="inl" onsubmit="return confirm(\'Delete this post?\')">'
+            echo '<form method="post" action="?p=delete" class="inl delf" onsubmit="return confirm(\'Delete this post?\')">'
                 . '<input type="hidden" name="csrf" value="' . csrf() . '"><input type="hidden" name="id" value="' . (int)$p['id']
                 . '"><button class="lnk del" title="Delete">delete</button></form>';
         }
