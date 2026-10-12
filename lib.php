@@ -709,18 +709,23 @@ function page_head(string $title, array $meta = []): void {
 <meta name="apple-mobile-web-app-title" content="Wuphf">
 </head><body>
 <header><div class="bar"><a class="logo" href="./"><?= h($CFG['site_name']) ?></a><nav class="nav">
-<a href="?p=public">Public</a>
 <?php if ($u): $unread = unread_count($u); ?>
-<a class="icon-btn nbell" href="?p=notifications" aria-label="Notifications<?= $unread ? ' (' . $unread . ' new)' : '' ?>" title="Notifications"><?= icon('bell') ?><?php if ($unread): ?><span class="badge"><?= $unread > 99 ? '99+' : $unread ?></span><?php endif; ?></a>
-<a class="icon-btn" href="?p=bookmarks" aria-label="Bookmarks" title="Bookmarks"><?= icon('bookmark') ?></a>
 <a href="?p=user&amp;u=<?= h($u['username']) ?>">@<?= h($u['username']) ?></a>
+<a href="?p=public">Public</a>
 <a href="?p=settings">Settings</a>
 <?php if (is_admin($u)): ?><a href="?p=admin">Admin</a><?php endif; ?>
 <form method="post" action="?p=logout" class="inl"><input type="hidden" name="csrf" value="<?= csrf() ?>"><button class="lnk">Log out</button></form>
 <?php else: ?>
+<a href="?p=public">Public</a>
 <a href="?p=login">Log in</a><?php if ($CFG['allow_signup']): ?> <a href="?p=register">Sign up</a><?php endif; ?>
 <?php endif; ?>
+<span class="icons">
+<?php if ($u): ?>
+<a class="icon-btn nbell" href="?p=notifications" aria-label="Notifications<?= $unread ? ' (' . $unread . ' new)' : '' ?>" title="Notifications"><?= icon('bell') ?><?php if ($unread): ?><span class="badge"><?= $unread > 99 ? '99+' : $unread ?></span><?php endif; ?></a>
+<a class="icon-btn" href="?p=bookmarks" aria-label="Bookmarks" title="Bookmarks"><?= icon('bookmark') ?></a>
+<?php endif; ?>
 <button type="button" class="icon-btn" id="theme" aria-label="Switch between light and dark mode" title="Light / dark"><?= icon('moon', 'moon') ?><?= icon('sun', 'sun') ?></button>
+</span>
 </nav>
 <form class="search" action="./" method="get" role="search"><input type="hidden" name="p" value="search">
 <input type="search" name="q" value="<?= h($_GET['q'] ?? '') ?>" placeholder="Search" maxlength="60" aria-label="Search"></form>

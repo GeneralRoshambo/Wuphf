@@ -228,3 +228,5 @@ select{display:block;width:100%;margin-top:6px;padding:11px 14px;border:1px soli
   .nav .icon-btn{width:30px;height:30px}
   .logo{font-size:1.3rem}
 }
+
+.nav .icons{display:flex;align-items:center;gap:2px;margin-left:4px}
