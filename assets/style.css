@@ -167,3 +167,4 @@ main>.tnode,main>.tc,.thread{border-bottom:1px solid var(--line)}
 .flash.banner{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.banner .lnk{color:var(--accent);font-weight:600}
 input:disabled{opacity:.7}
 .card .hint{margin:-4px 0 14px}
+.card .btn + .hint{margin:18px 0 0}
