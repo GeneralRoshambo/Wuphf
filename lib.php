@@ -224,38 +224,78 @@ function feed(string $where, array $args, string $qs, string $empty = 'No posts 
     if (count($rows) > $per) echo '<p class="more"><a href="?' . $qs . 'before=' . (int)$rows[$per - 1]['id'] . '">Older &rarr;</a></p>';
 }
 
-/** Replies tab: each reply is drawn under its parent, joined by a thread line. */
-function render_reply_threads(array $replies, ?array $viewer): void {
-    $ids = array_values(array_unique(array_filter(array_column($replies, 'reply_to'))));
-    $parents = [];
-    if ($ids) {
-        $in = implode(',', array_map('intval', $ids));
-        foreach (q(POST_SELECT . " WHERE p.id IN ($in)")->fetchAll() as $r) $parents[$r['id']] = $r;
+/** Posts above $id, root first (up to 12 levels). $cache is shared across calls. */
+function ancestors(int $id, array &$cache): array {
+    $chain = [];
+    for ($i = 0; $i < 12 && $id; $i++) {
+        if (!array_key_exists($id, $cache)) $cache[$id] = q(POST_SELECT . ' WHERE p.id = ?', [$id])->fetch() ?: null;
+        if (!$cache[$id]) break;
+        array_unshift($chain, $cache[$id]);
+        $id = (int)$cache[$id]['reply_to'];
     }
+    return $chain;
+}
+
+/** Replies tab: each reply sits under the chain of posts it answers. Long chains
+ *  show the root, a "more" link, and the direct parent. */
+function render_reply_threads(array $replies, ?array $viewer): void {
+    $cache = [];
     foreach ($replies as $r) {
+        $chain = ancestors((int)$r['reply_to'], $cache);
         echo '<div class="tpair">';
-        if (isset($parents[$r['reply_to']])) { echo '<div class="tparent">'; render_posts([$parents[$r['reply_to']]], $viewer, true); echo '</div>'; }
+        if ($chain) {
+            echo '<div class="tparent">';
+            if (count($chain) > 2) {
+                render_posts([$chain[0]], $viewer, true);
+                $hidden = count($chain) - 2;
+                echo '<a class="tmore" href="?p=status&amp;id=' . (int)$r['id'] . '">&middot; &middot; &middot; ' . $hidden
+                    . ' more post' . ($hidden == 1 ? '' : 's') . ' in this thread &middot; &middot; &middot;</a>';
+                render_posts([$chain[count($chain) - 1]], $viewer, true);
+            } else render_posts($chain, $viewer, true);
+            echo '</div>';
+        }
         echo '<div class="tchild">'; render_posts([$r], $viewer, true); echo '</div></div>';
     }
 }
 
-/** Full conversation under a post, nested. Loads up to 300 descendants, 8 levels deep. */
+/** Full conversation under a post, as branches. Each branch collapses; long sibling
+ *  runs fold behind "show more"; very deep branches continue on their own page. */
 function render_tree(int $rootId, ?array $viewer): void {
     $ids = q('WITH RECURSIVE t(id, d) AS (SELECT id, 1 FROM posts WHERE reply_to = ?
-              UNION ALL SELECT p.id, t.d + 1 FROM posts p JOIN t ON p.reply_to = t.id WHERE t.d < 8)
-              SELECT id FROM t LIMIT 300', [$rootId])->fetchAll(PDO::FETCH_COLUMN);
+              UNION ALL SELECT p.id, t.d + 1 FROM posts p JOIN t ON p.reply_to = t.id WHERE t.d < 12)
+              SELECT id FROM t LIMIT 400', [$rootId])->fetchAll(PDO::FETCH_COLUMN);
     if (!$ids) return;
     $kids = [];
     foreach (q(POST_SELECT . ' WHERE p.id IN (' . implode(',', array_map('intval', $ids)) . ') ORDER BY p.id')->fetchAll() as $r) {
         $kids[(int)$r['reply_to']][] = $r;
     }
-    $walk = function (int $parent, int $depth) use (&$walk, $kids, $viewer) {
-        foreach ($kids[$parent] ?? [] as $r) {
-            echo '<div class="tnode' . ($depth >= 5 ? ' flat' : '') . '">';
+    $count = function (int $id) use (&$count, $kids): int {
+        $n = 0;
+        foreach ($kids[$id] ?? [] as $k) $n += 1 + $count((int)$k['id']);
+        return $n;
+    };
+    $plural = fn(int $n) => $n . ' repl' . ($n == 1 ? 'y' : 'ies');
+    $walk = function (int $parent, int $depth) use (&$walk, $kids, $viewer, $count, $plural) {
+        $list = $kids[$parent] ?? [];
+        foreach ($list as $i => $r) {
+            if ($i === 5 && count($list) > 5) echo '<details class="tmorebox"><summary>Show ' . (count($list) - 5) . ' more ' . (count($list) - 5 == 1 ? 'reply' : 'replies') . '</summary>';
+            echo '<div class="tnode">';
             render_posts([$r], $viewer, true);
-            if (!empty($kids[(int)$r['id']])) { echo '<div class="tkids">'; $walk((int)$r['id'], $depth + 1); echo '</div>'; }
+            $id = (int)$r['id'];
+            if (!empty($kids[$id])) {
+                $n = $count($id);
+                if ($depth >= 5) {
+                    echo '<a class="tcont" href="?p=status&amp;id=' . $id . '">Continue this thread (' . $plural($n) . ') &rarr;</a>';
+                } else {
+                    // Top two levels start open; deeper branches start folded.
+                    echo '<details class="tkids"' . ($depth <= 2 ? ' open' : '') . '><summary><span class="sumtxt">' . $plural($n) . '</span></summary>';
+                    $walk($id, $depth + 1);
+                    echo '</details>';
+                }
+            }
             echo '</div>';
         }
+        if (count($list) > 5) echo '</details>';
     };
     $walk($rootId, 1);
 }
