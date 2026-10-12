@@ -1,21 +1,21 @@
-/* Wuphf: minimal, Threads x Twitter. One accent, hairlines instead of boxes,
+/* Wuphf: minimal, Threads x Twitter. One accent (Modularity blue, set in --accent below), hairlines instead of boxes,
    and a thread line that runs down the avatar column through a conversation. */
 :root{
   --bg:#f4f4f5; --surface:#ffffff; --chip:#f0f0f2; --line:#e7e7ea;
-  --fg:#0e0e10; --mute:#6c6c75; --accent:#d9480f; --accent-ink:#ffffff;
-  --ok:#157f4b; --warn:#b45309; --bad:#c62828; --hit:#fff3ec;
+  --fg:#0e0e10; --mute:#6c6c75; --accent:#1d5bff; --accent-ink:#ffffff;
+  --ok:#157f4b; --warn:#b45309; --bad:#c62828; --hit:#eef3ff;
   --radius:18px; --gutter:20px;
   --font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#0a0a0a; --surface:#141414; --chip:#1e1e1f; --line:#2a2a2c;
-  --fg:#f2f2f3; --mute:#8d8d95; --accent:#ff8a4c; --accent-ink:#0a0a0a;
-  --ok:#4cc38a; --warn:#f0a53a; --bad:#ff6b6b; --hit:#241a14; color-scheme:dark}}
+  --fg:#f2f2f3; --mute:#8d8d95; --accent:#6f9bff; --accent-ink:#0a0a0a;
+  --ok:#4cc38a; --warn:#f0a53a; --bad:#ff6b6b; --hit:#131c30; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#0a0a0a; --surface:#141414; --chip:#1e1e1f; --line:#2a2a2c;
-  --fg:#f2f2f3; --mute:#8d8d95; --accent:#ff8a4c; --accent-ink:#0a0a0a;
-  --ok:#4cc38a; --warn:#f0a53a; --bad:#ff6b6b; --hit:#241a14; color-scheme:dark}
+  --fg:#f2f2f3; --mute:#8d8d95; --accent:#6f9bff; --accent-ink:#0a0a0a;
+  --ok:#4cc38a; --warn:#f0a53a; --bad:#ff6b6b; --hit:#131c30; color-scheme:dark}
 
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
@@ -156,3 +156,14 @@ main>.tnode,main>.tc,.thread{border-bottom:1px solid var(--line)}
 .fol{font-size:.72rem;font-weight:600;line-height:1;padding:4px 10px;border-radius:999px;border:1px solid var(--line);background:transparent;color:var(--fg);cursor:pointer;align-self:center}
 .fol:hover{background:var(--fg);color:var(--surface);border-color:var(--fg)}
 .fol:disabled{opacity:.5;cursor:default}
+
+/* footer credit, forms */
+.foot{max-width:640px;margin:0 auto;padding:4px 16px 36px;text-align:center;font-size:.8rem;color:var(--mute)}
+.foot a{color:var(--mute);text-decoration:underline;text-underline-offset:2px}.foot a:hover{color:var(--fg)}
+.hint{font-size:.82rem;color:var(--mute);margin:8px 0 0;font-weight:400}
+.hint a{color:var(--accent)}
+.card .check{display:flex;gap:10px;align-items:flex-start;color:var(--fg);font-size:.9rem}
+.check input{width:auto;margin:3px 0 0}
+.flash.banner{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.banner .lnk{color:var(--accent);font-weight:600}
+input:disabled{opacity:.7}
+.card .hint{margin:-4px 0 14px}

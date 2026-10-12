@@ -17,10 +17,13 @@ function db(): PDO {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT NOT NULL UNIQUE COLLATE NOCASE,
         pass TEXT NOT NULL,
-        bio TEXT NOT NULL DEFAULT "",
-        website TEXT NOT NULL DEFAULT "",
+        bio TEXT NOT NULL DEFAULT \'\',
+        website TEXT NOT NULL DEFAULT \'\',
+        email TEXT NOT NULL DEFAULT \'\',
+        email_ok INTEGER NOT NULL DEFAULT 0,
+        twofa INTEGER NOT NULL DEFAULT 0,
         avatar_v INTEGER NOT NULL DEFAULT 0,
-        avatar_ext TEXT NOT NULL DEFAULT "jpg",
+        avatar_ext TEXT NOT NULL DEFAULT \'jpg\',
         created INTEGER NOT NULL)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS posts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,9 +33,22 @@ function db(): PDO {
         created INTEGER NOT NULL)');
     // Upgrade databases created by earlier versions.
     $have = fn($t) => array_column($pdo->query("PRAGMA table_info($t)")->fetchAll(), 'name');
-    if (!in_array('website', $have('users')))    $pdo->exec('ALTER TABLE users ADD COLUMN website TEXT NOT NULL DEFAULT ""');
-    if (!in_array('avatar_ext', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN avatar_ext TEXT NOT NULL DEFAULT "jpg"');
+    if (!in_array('website', $have('users')))    $pdo->exec('ALTER TABLE users ADD COLUMN website TEXT NOT NULL DEFAULT \'\'');
+    if (!in_array('avatar_ext', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN avatar_ext TEXT NOT NULL DEFAULT \'jpg\'');
     if (!in_array('reply_to', $have('posts')))   $pdo->exec('ALTER TABLE posts ADD COLUMN reply_to INTEGER REFERENCES posts(id) ON DELETE SET NULL');
+    foreach (['email TEXT NOT NULL DEFAULT \'\'', 'email_ok INTEGER NOT NULL DEFAULT 0', 'twofa INTEGER NOT NULL DEFAULT 0'] as $def) {
+        if (!in_array(strtok($def, ' '), $have('users'))) $pdo->exec("ALTER TABLE users ADD COLUMN $def");
+    }
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(lower(email)) WHERE email <> \'\'');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL, hash TEXT NOT NULL,
+        expires INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0,
+        attempts INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS tokens_hash ON tokens(hash)');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS throttle (k TEXT NOT NULL, t INTEGER NOT NULL)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS throttle_k ON throttle(k, t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS posts_user ON posts(user_id, id)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS posts_reply ON posts(reply_to)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS post_tags (
@@ -73,6 +89,73 @@ function has_link(string $s): bool {
     if (preg_match('~(https?|ftp|mailto|data|javascript)\s*:|//|\bwww\s*\.~i', $s)) return true;
     $tlds = 'com|net|org|edu|gov|io|co|us|uk|ca|de|fr|es|it|nl|ru|cn|jp|in|br|au|info|biz|me|tv|xyz|app|dev|ly|gl|to|cc|sh|gg|link|site|online|store|tech|club|top|live|news|page|blog|ai|fm|am|be|ch|se|no|dk|fi|pl|nz|za|mx|ar|eu|asia|pro|name|mobi|ws|bz';
     return (bool)preg_match('~(?<![\w@])[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)*\.(' . $tlds . ')(?![a-z0-9])~i', $s);
+}
+
+// ---- Email, tokens, throttling ---------------------------------------------
+function site_url(): string {
+    global $CFG;
+    if (!empty($CFG['site_url'])) return rtrim($CFG['site_url'], '/');
+    $dir = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/\\');
+    return (!empty($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'localhost') . $dir;
+}
+
+function client_ip(): string { return $_SERVER['REMOTE_ADDR'] ?? '0'; }
+
+function send_mail(string $to, string $subject, string $body): bool {
+    global $CFG;
+    if (!filter_var($to, FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/', $to)) return false;
+    $from = $CFG['mail_from'];
+    if ($CFG['mail_mode'] === 'log') {
+        return file_put_contents(dirname($CFG['db_file']) . '/outbox.log', "To: $to\nSubject: $subject\n\n$body\n-----\n", FILE_APPEND) !== false;
+    }
+    $headers = "From: {$CFG['site_name']} <$from>\r\nReply-To: $from\r\nMIME-Version: 1.0\r\n"
+        . "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\nX-Mailer: Wuphf";
+    return @mail($to, '=?UTF-8?B?' . base64_encode($subject) . '?=', str_replace("\n", "\r\n", $body), $headers, '-f' . $from);
+}
+
+/** Create a token (old unused ones of the same kind for the user are cancelled). Returns the raw value to email. */
+function make_token(int $uid, string $kind, int $ttl, ?string $raw = null): string {
+    q('UPDATE tokens SET used = 1 WHERE user_id = ? AND kind = ? AND used = 0', [$uid, $kind]);
+    $raw ??= bin2hex(random_bytes(24));
+    q('INSERT INTO tokens (user_id, kind, hash, expires, created) VALUES (?,?,?,?,?)', [$uid, $kind, hash('sha256', $raw), time() + $ttl, time()]);
+    return $raw;
+}
+function find_token(string $raw, string $kind): ?array {
+    if ($raw === '') return null;
+    return q('SELECT * FROM tokens WHERE hash = ? AND kind = ? AND used = 0 AND expires > ?', [hash('sha256', $raw), $kind, time()])->fetch() ?: null;
+}
+function burn_token(int $id): void { q('UPDATE tokens SET used = 1 WHERE id = ?', [$id]); }
+
+/** True while under $max events for $key in the last $window seconds; records this one. */
+function rate_ok(string $key, int $max, int $window): bool {
+    q('DELETE FROM throttle WHERE t < ?', [time() - 86400]);
+    if ((int)q('SELECT COUNT(*) FROM throttle WHERE k = ? AND t > ?', [$key, time() - $window])->fetchColumn() >= $max) return false;
+    q('INSERT INTO throttle (k, t) VALUES (?,?)', [$key, time()]);
+    return true;
+}
+function throttle_count(string $key, int $window): int {
+    return (int)q('SELECT COUNT(*) FROM throttle WHERE k = ? AND t > ?', [$key, time() - $window])->fetchColumn();
+}
+
+function needs_confirm(?array $u): bool {
+    global $CFG;
+    return $u && $CFG['require_confirm'] && $u['email'] !== '' && !(int)$u['email_ok'];
+}
+
+function send_confirmation(array $u): bool {
+    global $CFG;
+    $raw = make_token((int)$u['id'], 'confirm', 172800);
+    return send_mail($u['email'], 'Confirm your email for ' . $CFG['site_name'],
+        "Hi @{$u['username']},\n\nConfirm your email address to start posting on {$CFG['site_name']}:\n\n"
+        . site_url() . "/?p=confirm&t=$raw\n\nThis link expires in 48 hours. If you did not create this account, you can ignore this email.\n");
+}
+
+function send_login_code(array $u): bool {
+    global $CFG;
+    $code = sprintf('%06d', random_int(0, 999999));
+    make_token((int)$u['id'], 'login', 600, $code);
+    return send_mail($u['email'], "Your {$CFG['site_name']} login code: $code",
+        "Your {$CFG['site_name']} login code is $code\n\nIt expires in 10 minutes. If you did not try to log in, change your password.\n");
 }
 
 function me(): ?array {
@@ -463,9 +546,14 @@ function page_head(string $title): void {
 </div></header>
 <main class="col">
 <?php if ($m = flash()): ?><div class="flash <?= h($m['k']) ?>" role="status"><?= h($m['m']) ?></div><?php endif;
+if (needs_confirm($u)): ?><div class="flash banner" role="status">Confirm your email to start posting. We sent a link to <b><?= h($u['email']) ?></b>.
+<form method="post" action="?p=resend" class="inl"><input type="hidden" name="csrf" value="<?= csrf() ?>"><button class="lnk">Resend link</button></form></div><?php endif;
 }
 
-function page_foot(): void { echo "</main><script src=\"assets/app.js\"></script></body></html>"; }
+function page_foot(): void {
+    echo '</main><footer class="foot">Built by <a href="https://modularitynet.com" rel="nofollow noopener" target="_blank">Modularity Networks</a></footer>'
+        . '<script src="assets/app.js"></script></body></html>';
+}
 
 function compose_box(int $replyTo = 0, string $prefill = ''): void {
     global $CFG;
