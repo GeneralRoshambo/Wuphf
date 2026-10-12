@@ -147,6 +147,12 @@ function site_url(): string {
 /** Version stamp for a static file (its modified time), so browsers refetch it after an update. */
 function asset_v(string $f): int { return (int)@filemtime(__DIR__ . '/' . $f); }
 
+/** Which build is live: the first line of build.txt, which each update zip carries. */
+function build_id(): string {
+    static $b = null;
+    return $b ??= is_file(__DIR__ . '/build.txt') ? trim((string)strtok((string)file_get_contents(__DIR__ . '/build.txt'), "\n")) : 'dev';
+}
+
 function client_ip(): string { return $_SERVER['REMOTE_ADDR'] ?? '0'; }
 
 function send_mail(string $to, string $subject, string $body): bool {
@@ -702,6 +708,7 @@ function page_head(string $title, array $meta = []): void {
 <link rel="stylesheet" href="assets/style.css?v=<?= asset_v('assets/style.css') ?>">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="alternate" type="application/rss+xml" title="<?= h($CFG['site_name']) ?>" href="?p=rss">
+<meta name="wuphf-build" content="<?= h(build_id()) ?>">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)">
@@ -741,7 +748,7 @@ if (needs_confirm($u)): ?><div class="flash banner" role="status">Confirm your e
 
 function page_foot(): void {
     echo '</main><footer class="foot"><div class="flinks"><a href="?p=page&amp;n=rules">Rules</a><a href="?p=page&amp;n=privacy">Privacy</a><a href="?p=rss">RSS</a></div>Built by <a href="https://modularitynet.com" rel="nofollow noopener" target="_blank">Modularity Networks</a></footer>'
-        . '<div id="toast" role="status" aria-live="polite"></div><script src="assets/app.js?v=' . asset_v('assets/app.js') . '"></script></body></html>';
+        . (is_admin(me()) ? '<div class="build">Build ' . h(build_id()) . '</div>' : '') . '<div id="toast" role="status" aria-live="polite"></div><script src="assets/app.js?v=' . asset_v('assets/app.js') . '"></script></body></html>';
 }
 
 function compose_box(int $replyTo = 0, string $prefill = ''): void {

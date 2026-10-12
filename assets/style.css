@@ -235,3 +235,5 @@ select{display:block;width:100%;margin-top:6px;padding:11px 14px;border:1px soli
 .addname input:not([type=hidden]):not([type=file]):not([type=checkbox]){flex:1 1 140px;margin:0;min-width:0;width:auto}
 input.mini:not([type=hidden]):not([type=file]):not([type=checkbox]){width:9.5em;display:inline-block;margin:0 4px 0 0;padding:5px 10px;font-size:.8rem;border-radius:999px}
 .renamef{display:inline-flex;align-items:center}
+
+.build{text-align:center;font-size:.7rem;color:var(--mute);padding:0 0 18px;opacity:.7}
