@@ -215,8 +215,8 @@ default: // home
         tab_bar(['following' => 'Following', 'all' => 'Everyone', 'replies' => 'Replies'], $tab, '');
     } else echo '<p class="hero">Short thoughts. 140 characters. No links, no noise. <a href="?p=register">Join in</a>.</p>';
     if ($tab === 'replies') {
-        echo '<p class="sub">Conversations you are in: replies to your posts and your own replies.</p>';
-        feed('p.reply_to IS NOT NULL AND (p.user_id = ?1 OR p.reply_to IN (SELECT id FROM posts WHERE user_id = ?1))', [$u['id']],
+        echo '<p class="sub">Conversations from people you follow, plus replies to your posts and your own replies.</p>';
+        feed('p.reply_to IS NOT NULL AND (p.user_id = ?1 OR p.user_id IN (SELECT followee FROM follows WHERE follower = ?1) OR p.reply_to IN (SELECT id FROM posts WHERE user_id = ?1))', [$u['id']],
              'tab=replies&amp;', 'No replies yet. Reply to someone, or wait for a reply to your posts.', true);
     } elseif ($tab === 'following') {
         feed('p.reply_to IS NULL AND (p.user_id = ?1 OR p.user_id IN (SELECT followee FROM follows WHERE follower = ?1))', [$u['id']], '',

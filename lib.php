@@ -236,25 +236,81 @@ function ancestors(int $id, array &$cache): array {
     return $chain;
 }
 
-/** Replies tab: each reply sits under the chain of posts it answers. Long chains
- *  show the root, a "more" link, and the direct parent. */
+/** Replies tabs: one card per conversation. Each card shows the full chain from the root
+ *  to every reply on this page, plus up to two follow-ups under each of those replies,
+ *  and links to the whole thread. Newest activity first. */
 function render_reply_threads(array $replies, ?array $viewer): void {
     $cache = [];
+    $groups = [];
     foreach ($replies as $r) {
+        $cache[(int)$r['id']] = $r;
         $chain = ancestors((int)$r['reply_to'], $cache);
-        echo '<div class="tpair">';
-        if ($chain) {
-            echo '<div class="tparent">';
-            if (count($chain) > 2) {
-                render_posts([$chain[0]], $viewer, true);
-                $hidden = count($chain) - 2;
-                echo '<a class="tmore" href="?p=status&amp;id=' . (int)$r['id'] . '">&middot; &middot; &middot; ' . $hidden
-                    . ' more post' . ($hidden == 1 ? '' : 's') . ' in this thread &middot; &middot; &middot;</a>';
-                render_posts([$chain[count($chain) - 1]], $viewer, true);
-            } else render_posts($chain, $viewer, true);
-            echo '</div>';
+        if (!$chain) continue;
+        $root = (int)$chain[0]['id'];
+        $g = $groups[$root] ?? ['hits' => [], 'inc' => [$root => true], 'max' => 0];
+        foreach ($chain as $c) $g['inc'][(int)$c['id']] = true;
+        $g['inc'][(int)$r['id']] = true;
+        $g['hits'][(int)$r['id']] = true;
+        $g['max'] = max($g['max'], (int)$r['id']);
+        $groups[$root] = $g;
+    }
+    if (!$groups) return;
+    uasort($groups, fn($a, $b) => $b['max'] <=> $a['max']);
+
+    // Up to two follow-ups under every reply that is on this page.
+    $hitIds = [];
+    foreach ($groups as $g) foreach ($g['hits'] as $id => $_) $hitIds[] = $id;
+    $seen = [];
+    foreach (q(POST_SELECT . ' WHERE p.reply_to IN (' . implode(',', $hitIds) . ') ORDER BY p.id')->fetchAll() as $c) {
+        $cache[(int)$c['id']] = $c;
+        $pid = (int)$c['reply_to'];
+        $seen[$pid] = ($seen[$pid] ?? 0) + 1;
+        if ($seen[$pid] > 2) continue;
+        foreach ($groups as $root => &$g) if (isset($g['hits'][$pid])) $g['inc'][(int)$c['id']] = true;
+        unset($g);
+    }
+
+    foreach ($groups as $root => $g) {
+        // Busy threads: keep the root, the path to the newest reply and its follow-ups,
+        // then fill up to 12 posts with the most recent of the rest.
+        if (count($g['inc']) > 12) {
+            $keep = [$root => true, $g['max'] => true];
+            foreach (ancestors((int)$cache[$g['max']]['reply_to'], $cache) as $c) $keep[(int)$c['id']] = true;
+            foreach ($g['inc'] as $id => $_) if (isset($cache[$id]) && (int)$cache[$id]['reply_to'] === $g['max']) $keep[$id] = true;
+            $rest = array_diff(array_keys($g['inc']), array_keys($keep));
+            rsort($rest);
+            // Add newest-first, but only posts whose parent is already kept, so the card stays connected.
+            do {
+                $added = false;
+                foreach ($rest as $k => $id) {
+                    if (count($keep) >= 12) break 2;
+                    if (isset($keep[(int)($cache[$id]['reply_to'] ?? 0)])) { $keep[$id] = true; unset($rest[$k]); $added = true; }
+                }
+            } while ($added);
+            $g['inc'] = $keep;
         }
-        echo '<div class="tchild">'; render_posts([$r], $viewer, true); echo '</div></div>';
+        $kids = [];
+        foreach (array_keys($g['inc']) as $id) {
+            if ($id !== $root && isset($cache[$id])) $kids[(int)$cache[$id]['reply_to']][] = $cache[$id];
+        }
+        foreach ($kids as &$list) usort($list, fn($a, $b) => $a['id'] <=> $b['id']);
+        unset($list);
+        $total = (int)q('WITH RECURSIVE t(id) AS (SELECT id FROM posts WHERE reply_to = ?
+                  UNION ALL SELECT p.id FROM posts p JOIN t ON p.reply_to = t.id) SELECT COUNT(*) FROM (SELECT id FROM t LIMIT 500)', [$root])->fetchColumn();
+        $walk = function (array $node, int $depth) use (&$walk, $kids, $g, $viewer) {
+            $id = (int)$node['id'];
+            echo '<div class="tc' . ($depth >= 4 ? ' flatc' : '') . ($id === $g['max'] ? ' hit' : '') . '">';
+            render_posts([$node], $viewer, true);
+            if (!empty($kids[$id])) {
+                echo '<div class="tcin">';
+                foreach ($kids[$id] as $k) $walk($k, $depth + 1);
+                echo '</div>';
+            }
+            echo '</div>';
+        };
+        echo '<div class="thread">';
+        $walk($cache[$root], 0);
+        echo '<a class="tview" href="?p=status&amp;id=' . $root . '">View full thread &middot; ' . $total . ' repl' . ($total == 1 ? 'y' : 'ies') . ' &rarr;</a></div>';
     }
 }
 

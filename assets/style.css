@@ -79,3 +79,9 @@ header .wrap{height:auto;min-height:52px}
 .tcin{margin-left:12px;padding-left:10px;border-left:2px solid #e1e8ed}
 .flatc>.tcin{margin-left:0;padding-left:0;border-left:0}
 .tcin>.focus{margin-bottom:8px}
+
+/* reply threads (Replies tabs) */
+.thread{background:#fff;border:1px solid #e1e8ed;border-radius:12px;padding:10px;margin-bottom:12px}
+.thread .post{border:0;padding:6px 4px;margin-bottom:4px;background:transparent}
+.thread .tc.hit>.post{background:#eef5fc;border-radius:8px}
+.tview{display:block;padding:6px 4px 2px;font-size:.85rem;font-weight:600}
