@@ -49,15 +49,68 @@
   var form = document.querySelector('form[data-saving]');
   if (form) {
     var photo = document.getElementById('photo'), prev = document.getElementById('avprev'), btn = document.getElementById('savebtn');
+    var crop = null;   // {img, x, y, z, base} while a JPEG/PNG is being framed
+    function stopCrop() { var c = document.getElementById('cropper'); if (c) c.remove(); crop = null; }
+    function startCrop(f) {
+      stopCrop();
+      var url = URL.createObjectURL(f), im = new Image();
+      im.onload = function () {
+        var S = 240, box = document.createElement('div'); box.id = 'cropper'; box.className = 'cropper';
+        box.innerHTML = '<div class="cropv" style="width:' + S + 'px;height:' + S + 'px"></div>'
+          + '<input type="range" class="cropz" min="1" max="4" step="0.01" value="1" aria-label="Zoom">'
+          + '<span class="hint">Drag to position, slide to zoom. This is how your photo will be cut.</span>';
+        prev.parentNode.insertBefore(box, prev.nextSibling);
+        var v = box.querySelector('.cropv'), z = box.querySelector('.cropz');
+        im.className = 'cropimg'; im.draggable = false; v.appendChild(im);
+        var base = S / Math.min(im.naturalWidth, im.naturalHeight);
+        crop = { img: im, S: S, base: base, z: 1, x: 0, y: 0 };
+        function place() {
+          var s = base * crop.z, w = im.naturalWidth * s, h = im.naturalHeight * s;
+          crop.x = Math.min(0, Math.max(S - w, crop.x)); crop.y = Math.min(0, Math.max(S - h, crop.y));
+          im.style.width = w + 'px'; im.style.height = h + 'px'; im.style.transform = 'translate(' + crop.x + 'px,' + crop.y + 'px)';
+        }
+        crop.x = (S - im.naturalWidth * base) / 2; crop.y = (S - im.naturalHeight * base) / 2; place();
+        z.addEventListener('input', function () {
+          var old = base * crop.z, cx = (S / 2 - crop.x) / old, cy = (S / 2 - crop.y) / old;   // keep the centre fixed
+          crop.z = parseFloat(z.value); var s = base * crop.z; crop.x = S / 2 - cx * s; crop.y = S / 2 - cy * s; place();
+        });
+        var drag = null;
+        v.addEventListener('pointerdown', function (e) { drag = { x: e.clientX - crop.x, y: e.clientY - crop.y }; v.setPointerCapture(e.pointerId); });
+        v.addEventListener('pointermove', function (e) { if (drag) { crop.x = e.clientX - drag.x; crop.y = e.clientY - drag.y; place(); } });
+        v.addEventListener('pointerup', function () { drag = null; });
+        v.addEventListener('pointercancel', function () { drag = null; });
+      };
+      im.src = url;
+    }
+    // Replace the chosen file with the framed square before the form goes out.
+    function applyCrop(done) {
+      if (!crop) return done();
+      var S = crop.S, s = crop.base * crop.z, out = 512, cv = document.createElement('canvas'); cv.width = cv.height = out;
+      var cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, out, out);
+      cx.drawImage(crop.img, -crop.x / s, -crop.y / s, S / s, S / s, 0, 0, out, out);
+      cv.toBlob(function (b) {
+        try { var dt = new DataTransfer(); dt.items.add(new File([b], 'photo.jpg', { type: 'image/jpeg' })); photo.files = dt.files; } catch (e) {}
+        done();
+      }, 'image/jpeg', 0.9);
+    }
     photo.addEventListener('change', function () {
-      var f = photo.files[0]; if (!f) return;
+      var f = photo.files[0]; stopCrop(); if (!f) return;
+      if (/^image\/(jpeg|png)$/.test(f.type) && window.DataTransfer && window.HTMLCanvasElement) {
+        prev.hidden = true; startCrop(f); return;
+      }
+      prev.hidden = false;   // GIFs keep their animation, so they are used as they are
       var img = new Image(); img.className = 'av'; img.width = img.height = 96; img.alt = '';
       img.src = URL.createObjectURL(f); prev.innerHTML = ''; prev.appendChild(img);
     });
-    form.addEventListener('submit', function () {
+    form.addEventListener('submit', function (e) {
+      if (crop && !form.dataset.cropped) {
+        e.preventDefault(); btn.disabled = true; btn.textContent = 'Saving\u2026'; form.classList.add('busy');
+        applyCrop(function () { form.dataset.cropped = '1'; form.submit(); });
+        return;
+      }
       btn.disabled = true; btn.textContent = 'Saving\u2026'; form.classList.add('busy');
     });
-    window.addEventListener('pageshow', function () { btn.disabled = false; btn.textContent = 'Save'; form.classList.remove('busy'); });
+    window.addEventListener('pageshow', function () { btn.disabled = false; btn.textContent = 'Save'; form.classList.remove('busy'); delete form.dataset.cropped; });
   }
 })();
 

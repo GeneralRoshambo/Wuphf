@@ -319,3 +319,11 @@ input.mini:not([type=hidden]):not([type=file]):not([type=checkbox]){width:9.5em;
 .editbox textarea{width:100%;box-sizing:border-box;font:inherit;background:var(--chip);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:8px;margin:6px 0}
 .editbox .row{display:flex;gap:8px;justify-content:flex-end;align-items:center}
 .editbox .ghost{background:transparent;color:var(--mute);border:1px solid var(--line)}
+
+.cropper{display:flex;flex-direction:column;align-items:center;gap:8px;margin:8px 0}
+.cropv{position:relative;overflow:hidden;border-radius:50%;background:var(--chip);touch-action:none;cursor:grab;outline:2px solid var(--accent)}
+.cropv:active{cursor:grabbing}
+.cropimg{position:absolute;left:0;top:0;max-width:none;user-select:none;-webkit-user-drag:none;pointer-events:none}
+.cropz{width:240px}
+#avprev[hidden]{display:none}
+.cropper .cropz{width:240px!important;max-width:100%;padding:0;border:0}

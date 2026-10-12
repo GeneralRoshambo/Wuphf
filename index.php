@@ -568,7 +568,7 @@ case 'settings':
 <form method="post" action="?p=settings" enctype="multipart/form-data" class="card" data-saving>
 <input type="hidden" name="csrf" value="<?= csrf() ?>">
 <div class="center" id="avprev"><?= avatar($u, 96) ?></div>
-<label>Profile photo (JPEG, PNG, or an animated GIF up to 2 MB)
+<label>Profile photo (JPEG or PNG you can crop, or an animated GIF up to 2 MB)
 <input type="file" name="photo" id="photo" accept="image/jpeg,image/png,image/gif"></label>
 <label>Bio (<?= (int)$CFG['max_chars'] ?> chars, no links)
 <textarea name="bio" rows="3" maxlength="<?= (int)$CFG['max_chars'] ?>"><?= h($u['bio']) ?></textarea></label>

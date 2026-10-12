@@ -87,4 +87,4 @@ To deploy automatically on every push to `main` (and the working branch listed i
 - Link blocking is best-effort (URL schemes, `www.`, and common domain endings).
 
 ## Config
-See `config.php` (site name, close registration, page size, post cooldown, `edit_window`: seconds an author can edit a post, default 300). The build number shows only to admins (page footer); `build.txt` is blocked from direct web access.
+See `config.php` (site name, close registration, page size, post cooldown, `edit_window`: seconds an author can edit a post, default 300). The build number shows only to admins (page footer); `build.txt` is blocked from direct web access. Profile photos (JPEG/PNG) are framed and cropped in the browser before upload; animated GIFs are uploaded unchanged.
