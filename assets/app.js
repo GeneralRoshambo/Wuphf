@@ -1,4 +1,18 @@
 (function () {
+  // Light / dark toggle. Starts from the system setting; the choice is remembered.
+  var btn = document.getElementById('theme'); if (!btn) return;
+  var root = document.documentElement;
+  var dark = function () {
+    return root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  };
+  btn.addEventListener('click', function () {
+    var next = dark() ? 'light' : 'dark';
+    root.dataset.theme = next;
+    try { localStorage.setItem('wuphf-theme', next); } catch (e) {}
+  });
+})();
+
+(function () {
   // Compose box: live counter (first N @usernames are free, like the server),
   // Enter sends, and a cooldown after each post.
   var t = document.getElementById('body'), c = document.getElementById('count');

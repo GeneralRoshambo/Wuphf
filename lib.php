@@ -384,11 +384,20 @@ function cooldown_left(?array $u): int {
     return max(0, (int)$CFG['min_post_gap'] - (time() - $last));
 }
 
+const ICONS = [
+    'reply' => '<path d="M21 11.5a8.5 8.5 0 0 1-12.4 7.55L3 20.5l1.45-5.2A8.5 8.5 0 1 1 21 11.5Z"/>',
+    'sun'   => '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    'moon'  => '<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/>',
+];
+function icon(string $n, string $cls = ''): string {
+    return '<svg class="' . $cls . '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' . ICONS[$n] . '</svg>';
+}
+
 function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
     foreach ($rows as $p) {
         echo '<article class="post" id="p' . (int)$p['id'] . '">';
         echo '<a href="?p=user&amp;u=' . h($p['username']) . '">' . avatar($p, 48) . '</a>';
-        echo '<div class="pb"><div class="ph"><a class="un" href="?p=user&amp;u=' . h($p['username']) . '">@'
+        echo '<div class="pb"><div class="phd"><a class="un" href="?p=user&amp;u=' . h($p['username']) . '">@'
             . h($p['username']) . '</a> <a class="t" href="?p=status&amp;id=' . (int)$p['id'] . '">' . h(ago((int)$p['created'])) . '</a>';
         if ($viewer && (int)$viewer['id'] === (int)$p['user_id']) {
             echo '<form method="post" action="?p=delete" class="inl" onsubmit="return confirm(\'Delete this post?\')">'
@@ -400,8 +409,9 @@ function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
             echo '<div class="rl">Replying to <a href="?p=status&amp;id=' . (int)$p['reply_to'] . '">@' . h($p['reply_user']) . '</a></div>';
         }
         echo '<p>' . render_body($p['body']) . '</p>';
-        echo '<div class="acts"><a href="?p=status&amp;id=' . (int)$p['id'] . '#reply">Reply'
-            . ((int)$p['replies'] ? ' · ' . (int)$p['replies'] : '') . '</a></div>';
+        $n = (int)$p['replies'];
+        echo '<div class="acts"><a class="act" href="?p=status&amp;id=' . (int)$p['id'] . '#reply" aria-label="Reply">'
+            . icon('reply') . ($n ? '<span>' . $n . '</span>' : '') . '</a></div>';
         echo '</div></article>';
     }
 }
@@ -414,13 +424,16 @@ function page_head(string $title): void {
 <title><?= h($title) ?> · <?= h($CFG['site_name']) ?></title>
 <link rel="stylesheet" href="assets/style.css">
 <link rel="manifest" href="manifest.webmanifest">
-<meta name="theme-color" content="#1d6fb8">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)">
+<script>try{var t=localStorage.getItem('wuphf-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="icon" type="image/png" href="assets/icons/icon-192.png">
 <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Wuphf">
 </head><body>
-<header><div class="wrap"><a class="logo" href="./"><?= h($CFG['site_name']) ?></a><nav>
+<header><div class="bar"><a class="logo" href="./"><?= h($CFG['site_name']) ?></a><nav class="nav">
 <?php if ($u): ?>
 <a href="?p=public">Public</a>
 <a href="?p=user&amp;u=<?= h($u['username']) ?>">@<?= h($u['username']) ?></a>
@@ -429,11 +442,12 @@ function page_head(string $title): void {
 <?php else: ?>
 <a href="?p=public">Public</a> <a href="?p=login">Log in</a><?php if ($CFG['allow_signup']): ?> <a href="?p=register">Sign up</a><?php endif; ?>
 <?php endif; ?>
+<button type="button" class="icon-btn" id="theme" aria-label="Switch between light and dark mode" title="Light / dark"><?= icon('moon', 'moon') ?><?= icon('sun', 'sun') ?></button>
 </nav>
 <form class="search" action="./" method="get" role="search"><input type="hidden" name="p" value="search">
 <input type="search" name="q" value="<?= h($_GET['q'] ?? '') ?>" placeholder="Search" maxlength="60" aria-label="Search"></form>
 </div></header>
-<main class="wrap">
+<main class="col">
 <?php if ($m = flash()): ?><div class="flash <?= h($m['k']) ?>" role="status"><?= h($m['m']) ?></div><?php endif;
 }
 
@@ -446,8 +460,11 @@ function compose_box(int $replyTo = 0, string $prefill = ''): void {
 <form method="post" action="?p=post" class="compose" id="<?= $replyTo ? 'reply' : 'compose' ?>">
 <input type="hidden" name="csrf" value="<?= csrf() ?>">
 <?php if ($replyTo): ?><input type="hidden" name="reply_to" value="<?= $replyTo ?>"><?php endif; ?>
+<?= avatar(me(), 40) ?>
+<div class="cbody">
 <textarea name="body" id="body" rows="<?= $replyTo ? 2 : 3 ?>" maxlength="<?= hard_max() ?>"
  placeholder="<?= h($ph) ?>" required><?= h($prefill) ?></textarea>
-<div class="row"><span class="hintkey">Enter to send</span><span id="count" data-max="<?= (int)$CFG['max_chars'] ?>" data-free="<?= (int)$CFG['free_mentions'] ?>" data-cd="<?= cooldown_left(me()) ?>" data-gap="<?= (int)$CFG['min_post_gap'] ?>"><?= (int)$CFG['max_chars'] ?></span><button class="btn" id="sendbtn" data-label="<?= $replyTo ? 'Reply' : 'Wuphf' ?>"><?= $replyTo ? 'Reply' : 'Wuphf' ?></button></div>
+<div class="row"><span class="hintkey">Enter to send</span><span id="count" data-max="<?= (int)$CFG['max_chars'] ?>" data-free="<?= (int)$CFG['free_mentions'] ?>" data-cd="<?= cooldown_left(me()) ?>" data-gap="<?= (int)$CFG['min_post_gap'] ?>"><?= (int)$CFG['max_chars'] ?></span><button class="btn" id="sendbtn" data-label="<?= $replyTo ? 'Reply' : 'Post' ?>"><?= $replyTo ? 'Reply' : 'Post' ?></button></div>
+</div>
 </form><?php
 }
