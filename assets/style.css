@@ -31,8 +31,9 @@ button{font:inherit;color:inherit}
 .inl{display:inline;margin:0}
 
 /* header */
-header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 88%,transparent);
-  -webkit-backdrop-filter:saturate(1.4) blur(10px);backdrop-filter:saturate(1.4) blur(10px)}
+header{--hb:var(--bg);position:sticky;top:0;z-index:5;background:var(--hb)}
+header::after{content:"";position:absolute;left:0;right:0;top:100%;height:28px;pointer-events:none;
+  background:linear-gradient(to bottom,var(--hb),color-mix(in srgb,var(--hb) 70%,transparent) 35%,transparent)}
 .bar{max-width:640px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap}
 .logo{font-weight:800;font-size:1.45rem;letter-spacing:-.06em;margin-right:auto;line-height:1}
 .logo:hover{text-decoration:none}
@@ -146,7 +147,7 @@ main>.tnode,main>.tc,.thread{border-bottom:1px solid var(--line)}
 /* phones: the column is the page */
 @media (max-width:639px){
   body{background:var(--surface)}
-  header{background:color-mix(in srgb,var(--surface) 90%,transparent)}
+  header{--hb:var(--surface)}
   .col{min-height:calc(100vh - 110px)}
 }
 .compose textarea{height:3.4em;min-height:0}
