@@ -1,0 +1,24 @@
+name: Deploy to cPanel
+# Runs on every push to main, or by hand from the Actions tab.
+# Add these under Settings > Secrets and variables > Actions:
+#   CPANEL_HOST, CPANEL_USER, CPANEL_TOKEN, DEPLOY_DIR (optional), SITE_URL (optional)
+# Without CPANEL_TOKEN the job skips itself.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+concurrency: deploy
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload to cPanel
+        run: ./tools/deploy.sh
+        env:
+          ALLOW_SKIP: "1"
+          CPANEL_HOST: ${{ secrets.CPANEL_HOST }}
+          CPANEL_USER: ${{ secrets.CPANEL_USER }}
+          CPANEL_TOKEN: ${{ secrets.CPANEL_TOKEN }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          SITE_URL: ${{ secrets.SITE_URL }}

@@ -1,6 +1,6 @@
 <?php
 // Wuphf configuration. Edit to taste.
-return [
+$config = [
     'site_name'    => 'Wuphf',
     'max_chars'    => 140,
     'allow_signup' => true,          // set false to close registration
@@ -14,3 +14,7 @@ return [
     'force_2fa'    => false,         // true = everyone with a confirmed email gets a login code
     'min_post_gap' => 5,             // seconds a user must wait between posts
 ];
+
+// Server-specific overrides live in config.local.php, which deploys never touch.
+if (is_file(__DIR__ . '/config.local.php')) $config = array_replace($config, require __DIR__ . '/config.local.php');
+return $config;
