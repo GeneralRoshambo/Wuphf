@@ -77,3 +77,45 @@ document.addEventListener('submit', function (e) {
     document.querySelectorAll('form.folf[data-uid="' + uid + '"]').forEach(function (x) { x.remove(); });
   }).catch(function () { b.disabled = false; b.textContent = 'Follow'; });
 });
+
+// Like, dislike and repost: update in place from the server's counts.
+document.addEventListener('submit', function (e) {
+  var f = e.target.closest ? e.target.closest('form.actf') : null;
+  if (!f || !window.fetch) return;
+  e.preventDefault();
+  var data = new FormData(f); data.append('ajax', '1');
+  fetch(f.action, { method: 'POST', body: data, credentials: 'same-origin' })
+    .then(function (r) { if (!r.ok) throw 0; return r.json(); })
+    .then(function (s) {
+      document.querySelectorAll('button.act[data-pid="' + s.pid + '"]').forEach(function (b) {
+        var k = b.dataset.kind;
+        var n = k === 'like' ? s.likes : k === 'dislike' ? s.dislikes : s.reposts;
+        var on = k === 'like' ? s.mine === 1 : k === 'dislike' ? s.mine === -1 : s.reposted;
+        b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        b.querySelector('.n').textContent = n || '';
+      });
+    })
+    .catch(function () { location.reload(); });   // shows the server's message, e.g. "confirm your email"
+});
+
+// Share: the device's share sheet where there is one, otherwise copy the link.
+function toast(m) {
+  var t = document.getElementById('toast'); if (!t) return;
+  t.textContent = m; t.classList.add('show');
+  clearTimeout(toast.t); toast.t = setTimeout(function () { t.classList.remove('show'); }, 2200);
+}
+function copyText(t) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(t);
+  return new Promise(function (ok, no) {
+    var a = document.createElement('textarea'); a.value = t; a.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(a); a.select();
+    try { document.execCommand('copy') ? ok() : no(); } catch (x) { no(); }
+    a.remove();
+  });
+}
+document.addEventListener('click', function (e) {
+  var b = e.target.closest ? e.target.closest('[data-share]') : null; if (!b) return;
+  var url = b.dataset.share;
+  if (navigator.share) { navigator.share({ title: document.title, text: b.dataset.text, url: url }).catch(function () {}); return; }
+  copyText(url).then(function () { toast('Link copied'); }, function () { toast(url); });
+});

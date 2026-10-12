@@ -4,7 +4,7 @@ A tiny Twitter-style microblog: 140 characters, plain text only (links are rejec
 Plain PHP + SQLite, no Composer, no build step, no database to set up. The site starts empty: no sample accounts or posts.
 
 ## Features
-Sign up / log in, post (140 chars; the first 5 @usernames in a post don't count), delete own posts, replies and threads, #hashtags and @mentions, search (people, posts, #tags), a public feed anyone can read without logging in, follow / unfollow, "Following" and "Everyone" timelines, profiles with bio, photo (animated GIFs supported, up to 1 MB / 512 px) and one profile link, pagination.
+Sign up / log in, post (140 chars; the first 5 @usernames in a post don't count), delete own posts, replies and threads, #hashtags and @mentions, search (people, posts, #tags), a public feed anyone can read without logging in, like / dislike / repost / share buttons (reposts appear in your followers' feeds), follow / unfollow, "Following" and "Everyone" timelines, profiles with bio, photo (animated GIFs supported, up to 2 MB / 800 px; frames and loop are preserved and the file is rebuilt from its image data only) and one profile link, pagination.
 
 Links are blocked in posts and bios. The single profile link field is the only place a URL is allowed; it is shown with `rel="nofollow ugc"`.
 

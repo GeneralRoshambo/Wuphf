@@ -30,6 +30,7 @@ function db(): PDO {
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         body TEXT NOT NULL,
         reply_to INTEGER REFERENCES posts(id) ON DELETE SET NULL,
+        repost_of INTEGER REFERENCES posts(id) ON DELETE CASCADE,
         created INTEGER NOT NULL)');
     // Upgrade databases created by earlier versions.
     $have = fn($t) => array_column($pdo->query("PRAGMA table_info($t)")->fetchAll(), 'name');
@@ -50,6 +51,14 @@ function db(): PDO {
     $pdo->exec('CREATE TABLE IF NOT EXISTS throttle (k TEXT NOT NULL, t INTEGER NOT NULL)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS throttle_k ON throttle(k, t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS posts_user ON posts(user_id, id)');
+    if (!in_array('repost_of', $have('posts'))) $pdo->exec('ALTER TABLE posts ADD COLUMN repost_of INTEGER REFERENCES posts(id) ON DELETE CASCADE');
+    $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS reposts_once ON posts(user_id, repost_of) WHERE repost_of IS NOT NULL');
+    $pdo->exec('CREATE TABLE IF NOT EXISTS reactions (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+        val INTEGER NOT NULL, created INTEGER NOT NULL,
+        PRIMARY KEY (user_id, post_id))');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS reactions_post ON reactions(post_id)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS posts_reply ON posts(reply_to)');
     $pdo->exec('CREATE TABLE IF NOT EXISTS post_tags (
         post_id INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
@@ -210,6 +219,50 @@ function avatar(array $u, int $size = 48): string {
         . h(strtoupper($name[0])) . '</span>';
 }
 
+/** Rebuild a GIF from its image data only. Keeps every frame, timing and the loop setting;
+ *  drops comments, plain text and unknown extensions, and anything after the trailer.
+ *  Returns null if the file is not a well-formed GIF. */
+function clean_gif(string $d): ?string {
+    $n = strlen($d);
+    if ($n < 14 || !in_array(substr($d, 0, 6), ['GIF87a', 'GIF89a'], true)) return null;
+    $flags = ord($d[10]);
+    $gct = ($flags & 0x80) ? 3 * (1 << (($flags & 7) + 1)) : 0;
+    $pos = 13 + $gct;
+    if ($pos > $n) return null;
+    $out = substr($d, 0, $pos);
+    $frames = 0;
+    $skip = function (int $p) use ($d, $n): ?int {          // walk data sub-blocks, return the offset after them
+        while (true) {
+            if ($p >= $n) return null;
+            $len = ord($d[$p]); $p += 1 + $len;
+            if ($len === 0) return $p;
+        }
+    };
+    while ($pos < $n) {
+        $b = ord($d[$pos]);
+        if ($b === 0x3B) return $frames > 0 ? $out . "\x3B" : null;
+        if ($b === 0x21) {                                    // extension
+            if ($pos + 2 > $n) return null;
+            $label = ord($d[$pos + 1]);
+            $end = $skip($pos + 2); if ($end === null) return null;
+            $blk = substr($d, $pos, $end - $pos);
+            if ($label === 0xF9 || ($label === 0xFF && strlen($blk) <= 24 && str_contains($blk, 'NETSCAPE2.0'))) $out .= $blk;
+            $pos = $end; continue;
+        }
+        if ($b === 0x2C) {                                    // frame
+            if ($pos + 11 > $n) return null;
+            $f = ord($d[$pos + 9]);
+            $lct = ($f & 0x80) ? 3 * (1 << (($f & 7) + 1)) : 0;
+            $end = $skip($pos + 10 + $lct + 1); if ($end === null) return null;
+            $out .= substr($d, $pos, $end - $pos); $pos = $end;
+            if (++$frames > 300) return null;
+            continue;
+        }
+        return null;
+    }
+    return null;
+}
+
 /** Validate an uploaded image and store it. GIFs are kept as-is so they stay animated;
  *  JPEG/PNG are re-encoded to a 128x128 JPEG. Returns an error message or null. */
 function save_avatar(int $uid, array $f): ?string {
@@ -218,11 +271,11 @@ function save_avatar(int $uid, array $f): ?string {
     if (!$info || !in_array($info[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_GIF], true)) return 'Use a JPEG, PNG or GIF.';
     $dir = __DIR__ . '/avatars/';
     if ($info[2] === IMAGETYPE_GIF) {
-        if ($f['size'] > 1024 * 1024) return 'Animated GIFs must be under 1 MB.';
-        if ($info[0] > 512 || $info[1] > 512) return 'GIFs can be at most 512x512 pixels.';
-        $raw = (string)file_get_contents($f['tmp_name']);
-        if (strncmp($raw, 'GIF8', 4) !== 0 || str_contains($raw, '<?')) return 'That GIF looks invalid.';
-        if (file_put_contents($dir . $uid . '.gif', $raw) === false) return 'Could not save the photo (is avatars/ writable?).';
+        if ($f['size'] > 2 * 1024 * 1024) return 'Animated GIFs must be under 2 MB.';
+        if ($info[0] > 800 || $info[1] > 800) return 'GIFs can be at most 800x800 pixels.';
+        $gif = clean_gif((string)file_get_contents($f['tmp_name']));
+        if ($gif === null) return 'That GIF looks invalid.';
+        if (file_put_contents($dir . $uid . '.gif', $gif) === false) return 'Could not save the photo (is avatars/ writable?).';
         @unlink($dir . $uid . '.jpg'); $ext = 'gif';
     } else {
         if (!function_exists('imagecreatefromstring')) return 'JPEG/PNG uploads need the PHP GD extension (enable it in cPanel > Select PHP Version). GIFs work without it.';
@@ -293,6 +346,9 @@ function render_body(string $raw): string {
 
 const POST_SELECT = 'SELECT p.*, u.id AS uid, u.username, u.avatar_v, u.avatar_ext,
     (SELECT COUNT(*) FROM posts r WHERE r.reply_to = p.id) AS replies,
+    (SELECT COUNT(*) FROM reactions x WHERE x.post_id = p.id AND x.val = 1) AS likes,
+    (SELECT COUNT(*) FROM reactions x WHERE x.post_id = p.id AND x.val = -1) AS dislikes,
+    (SELECT COUNT(*) FROM posts rp WHERE rp.repost_of = p.id) AS reposts,
     (SELECT u2.username FROM posts pp JOIN users u2 ON u2.id = pp.user_id WHERE pp.id = p.reply_to) AS reply_user
     FROM posts p JOIN users u ON u.id = p.user_id';
 
@@ -466,12 +522,16 @@ function tab_bar(array $tabs, string $cur, string $base): void {
 function cooldown_left(?array $u): int {
     global $CFG;
     if (!$u) return 0;
-    $last = (int)q('SELECT MAX(created) FROM posts WHERE user_id = ?', [$u['id']])->fetchColumn();
+    $last = (int)q('SELECT MAX(created) FROM posts WHERE user_id = ? AND repost_of IS NULL', [$u['id']])->fetchColumn();
     return max(0, (int)$CFG['min_post_gap'] - (time() - $last));
 }
 
 const ICONS = [
     'reply' => '<path d="M21 11.5a8.5 8.5 0 0 1-12.4 7.55L3 20.5l1.45-5.2A8.5 8.5 0 1 1 21 11.5Z"/>',
+    'heart' => '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>',
+    'down'  => '<path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"/>',
+    'repeat'=> '<polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>',
+    'share' => '<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>',
     'sun'   => '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     'moon'  => '<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/>',
 ];
@@ -486,23 +546,75 @@ function following_ids(?array $viewer): array {
     return $ids ??= array_map('intval', q('SELECT followee FROM follows WHERE follower = ?', [$viewer['id']])->fetchAll(PDO::FETCH_COLUMN));
 }
 
+/** What the viewer has done to these posts: reaction (1 / -1) and reposts. */
+function viewer_state(?array $viewer, array $ids): array {
+    $react = []; $reposted = [];
+    if ($viewer && $ids) {
+        $in = implode(',', array_map('intval', $ids));
+        foreach (q("SELECT post_id, val FROM reactions WHERE user_id = ? AND post_id IN ($in)", [$viewer['id']])->fetchAll() as $r) $react[(int)$r['post_id']] = (int)$r['val'];
+        foreach (q("SELECT repost_of FROM posts WHERE user_id = ? AND repost_of IN ($in)", [$viewer['id']])->fetchAll(PDO::FETCH_COLUMN) as $id) $reposted[(int)$id] = true;
+    }
+    return [$react, $reposted];
+}
+
+/** Fresh counts and the viewer's own state for one post, as sent back to the page after a click. */
+function post_state(int $pid, array $u): array {
+    $c = q('SELECT (SELECT COUNT(*) FROM reactions WHERE post_id = ?1 AND val = 1) AS l,
+                   (SELECT COUNT(*) FROM reactions WHERE post_id = ?1 AND val = -1) AS d,
+                   (SELECT COUNT(*) FROM posts WHERE repost_of = ?1) AS r', [$pid])->fetch();
+    return ['pid' => $pid, 'likes' => (int)$c['l'], 'dislikes' => (int)$c['d'], 'reposts' => (int)$c['r'],
+            'mine' => (int)q('SELECT val FROM reactions WHERE user_id = ? AND post_id = ?', [$u['id'], $pid])->fetchColumn(),
+            'reposted' => (bool)q('SELECT 1 FROM posts WHERE user_id = ? AND repost_of = ?', [$u['id'], $pid])->fetch()];
+}
+
+function json_out(array $d, int $code = 200): never {
+    http_response_code($code); header('Content-Type: application/json'); echo json_encode($d); exit;
+}
+
+function permalink(int $id): string { return site_url() . '/?p=status&id=' . $id; }
+
+/** One small action button: a form so it works without JavaScript, upgraded in place by app.js. */
+function act_button(?array $viewer, string $kind, int $pid, int $count, bool $on, string $label, string $icon, string $route, string $v = ''): string {
+    $inner = icon($icon) . '<span class="n">' . ($count ? $count : '') . '</span>';
+    if (!$viewer) return '<a class="act" href="?p=login" aria-label="' . h($label) . ' (log in)" title="' . h($label) . '">' . $inner . '</a>';
+    return '<form method="post" action="?p=' . $route . '" class="inl actf"><input type="hidden" name="csrf" value="' . csrf() . '">'
+        . '<input type="hidden" name="id" value="' . $pid . '">' . ($v !== '' ? '<input type="hidden" name="v" value="' . $v . '">' : '')
+        . '<button class="act' . ($on ? ' on' : '') . '" data-kind="' . $kind . '" data-pid="' . $pid . '" aria-pressed="' . ($on ? 'true' : 'false')
+        . '" aria-label="' . h($label) . '" title="' . h($label) . '">' . $inner . '</button></form>';
+}
+
 function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
     $following = following_ids($viewer);
-    foreach ($rows as $p) {
-        echo '<article class="post" id="p' . (int)$p['id'] . '">';
-        echo '<a href="?p=user&amp;u=' . h($p['username']) . '">' . avatar($p, 48) . '</a>';
-        echo '<div class="pb"><div class="phd"><a class="un" href="?p=user&amp;u=' . h($p['username']) . '">@'
-            . h($p['username']) . '</a> <a class="t" href="?p=status&amp;id=' . (int)$p['id'] . '">' . h(ago((int)$p['created'])) . '</a>';
+    // A repost row stands for the original post; load the originals in one query.
+    $origIds = array_values(array_unique(array_filter(array_column($rows, 'repost_of'))));
+    $orig = [];
+    if ($origIds) foreach (q(POST_SELECT . ' WHERE p.id IN (' . implode(',', array_map('intval', $origIds)) . ')')->fetchAll() as $o) $orig[(int)$o['id']] = $o;
+    $shown = [];
+    foreach ($rows as $r) $shown[] = $r['repost_of'] ? (int)$r['repost_of'] : (int)$r['id'];
+    [$react, $reposted] = viewer_state($viewer, $shown);
+
+    foreach ($rows as $row) {
+        $by = null; $p = $row;
+        if ($row['repost_of']) {
+            if (!isset($orig[(int)$row['repost_of']])) continue;
+            $p = $orig[(int)$row['repost_of']]; $by = $row['username'];
+        }
+        $pid = (int)$p['id'];
+        echo '<article class="post" id="p' . (int)$row['id'] . '">';
+        echo '<a href="?p=user&amp;u=' . h($p['username']) . '">' . avatar($p, 40) . '</a>';
+        echo '<div class="pb">';
+        if ($by !== null) echo '<div class="rpby">' . icon('repeat') . '<a href="?p=user&amp;u=' . h($by) . '">@' . h($by) . '</a> reposted</div>';
+        echo '<div class="phd"><a class="un" href="?p=user&amp;u=' . h($p['username']) . '">@' . h($p['username']) . '</a> <a class="t" href="?p=status&amp;id=' . $pid . '">' . h(ago((int)$p['created'])) . '</a>';
         $author = (int)$p['user_id'];
         if ($viewer && $author !== (int)$viewer['id'] && !in_array($author, $following, true)) {
             echo '<form method="post" action="?p=follow" class="inl folf" data-uid="' . $author . '">'
                 . '<input type="hidden" name="csrf" value="' . csrf() . '"><input type="hidden" name="id" value="' . $author
-                . '"><input type="hidden" name="at" value="' . (int)$p['id'] . '"><button class="fol" title="Follow @' . h($p['username']) . '">Follow</button></form>';
+                . '"><input type="hidden" name="at" value="' . (int)$row['id'] . '"><button class="fol" title="Follow @' . h($p['username']) . '">Follow</button></form>';
         }
-        if ($viewer && (int)$viewer['id'] === (int)$p['user_id']) {
-            echo '<form method="post" action="?p=delete" class="inl delf" onsubmit="return confirm(\'Delete this post?\')">'
-                . '<input type="hidden" name="csrf" value="' . csrf() . '"><input type="hidden" name="id" value="' . (int)$p['id']
-                . '"><button class="lnk del" title="Delete">delete</button></form>';
+        if ($viewer && (int)$viewer['id'] === (int)$row['user_id']) {
+            echo '<form method="post" action="?p=delete" class="inl delf" onsubmit="return confirm(\'' . ($by !== null ? 'Undo this repost?' : 'Delete this post?') . '\')">'
+                . '<input type="hidden" name="csrf" value="' . csrf() . '"><input type="hidden" name="id" value="' . (int)$row['id']
+                . '"><button class="lnk del" title="Delete">' . ($by !== null ? 'undo' : 'delete') . '</button></form>';
         }
         echo '</div>';
         if ($p['reply_to'] && $p['reply_user'] && !$thread) {
@@ -510,18 +622,30 @@ function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
         }
         echo '<p>' . render_body($p['body']) . '</p>';
         $n = (int)$p['replies'];
-        echo '<div class="acts"><a class="act" href="?p=status&amp;id=' . (int)$p['id'] . '#reply" aria-label="Reply">'
-            . icon('reply') . ($n ? '<span>' . $n . '</span>' : '') . '</a></div>';
+        echo '<div class="acts"><a class="act" href="?p=status&amp;id=' . $pid . '#reply" aria-label="Reply" title="Reply">' . icon('reply') . '<span class="n">' . ($n ?: '') . '</span></a>'
+            . act_button($viewer, 'repost', $pid, (int)$p['reposts'], isset($reposted[$pid]), 'Repost', 'repeat', 'repost')
+            . act_button($viewer, 'like', $pid, (int)$p['likes'], ($react[$pid] ?? 0) === 1, 'Like', 'heart', 'react', '1')
+            . act_button($viewer, 'dislike', $pid, (int)$p['dislikes'], ($react[$pid] ?? 0) === -1, 'Dislike', 'down', 'react', '-1')
+            . '<button type="button" class="act" data-share="' . h(permalink($pid)) . '" data-text="' . h(mb_substr($p['body'], 0, 100)) . '" aria-label="Share" title="Share">' . icon('share') . '</button>'
+            . '</div>';
         echo '</div></article>';
     }
 }
 
-function page_head(string $title): void {
+function page_head(string $title, array $meta = []): void {
     global $CFG; $u = me();
     ?><!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title><?= h($title) ?> · <?= h($CFG['site_name']) ?></title>
+<?php $desc = $meta['description'] ?? 'Short thoughts. 140 characters. No links.'; ?>
+<meta name="description" content="<?= h($desc) ?>">
+<meta property="og:site_name" content="<?= h($CFG['site_name']) ?>">
+<meta property="og:title" content="<?= h($title) ?>">
+<meta property="og:description" content="<?= h($desc) ?>">
+<meta property="og:type" content="<?= h($meta['type'] ?? 'website') ?>">
+<meta property="og:url" content="<?= h($meta['url'] ?? site_url()) ?>">
+<meta name="twitter:card" content="summary">
 <link rel="stylesheet" href="assets/style.css?v=<?= asset_v('assets/style.css') ?>">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="color-scheme" content="light dark">
@@ -555,7 +679,7 @@ if (needs_confirm($u)): ?><div class="flash banner" role="status">Confirm your e
 
 function page_foot(): void {
     echo '</main><footer class="foot">Built by <a href="https://modularitynet.com" rel="nofollow noopener" target="_blank">Modularity Networks</a></footer>'
-        . '<script src="assets/app.js?v=' . asset_v('assets/app.js') . '"></script></body></html>';
+        . '<div id="toast" role="status" aria-live="polite"></div><script src="assets/app.js?v=' . asset_v('assets/app.js') . '"></script></body></html>';
 }
 
 function compose_box(int $replyTo = 0, string $prefill = ''): void {

@@ -106,7 +106,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!$u) go('?p=login');
 
-    if (in_array($route, ['post', 'follow'], true) && needs_confirm($u)) {
+    if (in_array($route, ['post', 'follow', 'react', 'repost'], true) && needs_confirm($u)) {
         flash('Confirm your email first. Use "Resend link" in the banner if you need a new one.');
         go($_SERVER['HTTP_REFERER'] ?? './');
     }
@@ -136,6 +136,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($reply) flash('Reply posted.', 'ok');
         }
         go($back);
+
+    case 'react':
+    case 'repost':
+        $pid = (int)($_POST['id'] ?? 0);
+        $row = q('SELECT id, repost_of FROM posts WHERE id = ?', [$pid])->fetch();
+        $ajax = !empty($_POST['ajax']);
+        if (!$row) { if ($ajax) json_out(['error' => 'gone'], 404); flash('That post is gone.'); go('./'); }
+        if ($row['repost_of']) $pid = (int)$row['repost_of'];            // always act on the original
+        if (!rate_ok($route . ':' . $u['id'], 120, 3600)) { if ($ajax) json_out(['error' => 'slow'], 429); flash('Slow down a little.'); go($_SERVER['HTTP_REFERER'] ?? './'); }
+        if ($route === 'react') {
+            $v = (int)($_POST['v'] ?? 0);
+            if ($v !== 1 && $v !== -1) json_out(['error' => 'bad'], 400);
+            $cur = q('SELECT val FROM reactions WHERE user_id = ? AND post_id = ?', [$u['id'], $pid])->fetchColumn();
+            if ($cur !== false && (int)$cur === $v) q('DELETE FROM reactions WHERE user_id = ? AND post_id = ?', [$u['id'], $pid]);   // same button again: undo
+            else q('INSERT OR REPLACE INTO reactions (user_id, post_id, val, created) VALUES (?,?,?,?)', [$u['id'], $pid, $v, time()]);
+        } else {
+            if (q('SELECT 1 FROM posts WHERE user_id = ? AND repost_of = ?', [$u['id'], $pid])->fetch()) q('DELETE FROM posts WHERE user_id = ? AND repost_of = ?', [$u['id'], $pid]);
+            else q("INSERT INTO posts (user_id, body, repost_of, created) VALUES (?, '', ?, ?)", [$u['id'], $pid, time()]);
+        }
+        if ($ajax) json_out(post_state($pid, $u));
+        go(($_SERVER['HTTP_REFERER'] ?? './') . '#p' . $pid);
 
     case 'delete':
         q('DELETE FROM posts WHERE id = ? AND user_id = ?', [(int)($_POST['id'] ?? 0), $u['id']]);
@@ -273,13 +294,15 @@ case 'status':
     $id = (int)($_GET['id'] ?? 0);
     $post = q(POST_SELECT . ' WHERE p.id = ?', [$id])->fetch();
     if (!$post) { http_response_code(404); page_head('Not found'); echo '<h1>That post is gone</h1>'; page_foot(); break; }
+    if ($post['repost_of']) go('?p=status&id=' . (int)$post['repost_of']);   // a repost's page is the original's
     $chain = []; $cur = $post;
     for ($i = 0; $i < 10 && $cur['reply_to']; $i++) {
         $cur = q(POST_SELECT . ' WHERE p.id = ?', [$cur['reply_to']])->fetch();
         if (!$cur) break;
         array_unshift($chain, $cur);
     }
-    page_head('@' . $post['username'] . ': ' . mb_substr($post['body'], 0, 30));
+    page_head('@' . $post['username'] . ': ' . mb_substr($post['body'], 0, 30),
+        ['description' => $post['body'], 'url' => permalink($id), 'type' => 'article']);
     echo '<p class="crumb"><a href="javascript:history.back()">&larr; Back</a></p>';
     $depth = chain_open($chain, $u);
     echo '<div class="focus">'; render_posts([$post], $u, true); echo '</div>';
@@ -326,7 +349,7 @@ case 'settings':
 <form method="post" action="?p=settings" enctype="multipart/form-data" class="card" data-saving>
 <input type="hidden" name="csrf" value="<?= csrf() ?>">
 <div class="center" id="avprev"><?= avatar($u, 96) ?></div>
-<label>Profile photo (JPEG, PNG, or an animated GIF up to 1 MB)
+<label>Profile photo (JPEG, PNG, or an animated GIF up to 2 MB)
 <input type="file" name="photo" id="photo" accept="image/jpeg,image/png,image/gif"></label>
 <label>Bio (<?= (int)$CFG['max_chars'] ?> chars, no links)
 <textarea name="bio" rows="3" maxlength="<?= (int)$CFG['max_chars'] ?>"><?= h($u['bio']) ?></textarea></label>
