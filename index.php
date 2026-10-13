@@ -532,6 +532,33 @@ case 'status':
     chain_close($depth);
     page_foot(); break;
 
+case 'embed':
+    $id = (int)($_GET['id'] ?? 0);
+    $post = q(POST_SELECT . ' WHERE p.id = ?', [$id])->fetch();
+    if ($post && $post['repost_of']) $post = q(POST_SELECT . ' WHERE p.id = ?', [$post['repost_of']])->fetch();
+    if ($post && (int)q('SELECT is_suspended FROM users WHERE id = ?', [$post['user_id']])->fetchColumn()) $post = false;
+    $theme = in_array($_GET['theme'] ?? '', ['light', 'dark'], true) ? $_GET['theme'] : '';
+    header('Content-Type: text/html; charset=utf-8'); header('X-Robots-Tag: noindex'); header_remove('X-Frame-Options');
+    echo '<!doctype html><html lang="en"' . ($theme ? ' data-theme="' . $theme . '"' : '') . '><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><base href="' . h(request_base()) . '" target="_blank"><meta name="robots" content="noindex"><title>Wuphf</title><style>'
+        . ':root{--bg:#fff;--fg:#0e0e10;--mute:#6c6c75;--line:#e1e1e6;--accent:#1d5bff}'
+        . '@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#141414;--fg:#f2f2f3;--mute:#9a9aa3;--line:#2a2a2c;--accent:#6f9bff}}'
+        . ':root[data-theme=dark]{--bg:#141414;--fg:#f2f2f3;--mute:#9a9aa3;--line:#2a2a2c;--accent:#6f9bff}'
+        . '*{box-sizing:border-box}html,body{margin:0;background:transparent}body{font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--fg);padding:2px}'
+        . 'a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}'
+        . '.c{background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:16px;max-width:560px}'
+        . '.h{display:flex;align-items:center;gap:10px}.av{border-radius:50%;object-fit:cover;display:block;flex:none;color:#fff;text-align:center;font-weight:700}'
+        . '.n{font-weight:700;color:var(--fg)}.m{color:var(--mute);font-size:13px}.t{margin:12px 0;font-size:18px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere}'
+        . '.f{display:flex;justify-content:space-between;align-items:center;color:var(--mute);font-size:13px;gap:10px}.w{font-weight:800;letter-spacing:-.05em;color:var(--fg)}'
+        . '</style></head><body>';
+    if (!$post) { echo '<div class="c"><span class="m">This Wuphf is no longer available.</span></div>'; }
+    else {
+        echo '<div class="c"><div class="h"><a href="?p=user&amp;u=' . h($post['username']) . '">' . avatar($post, 40) . '</a><div><a class="n" href="?p=user&amp;u=' . h($post['username']) . '">@' . h($post['username']) . '</a><div class="m">' . h(date('M j, Y', (int)$post['created'])) . '</div></div></div>'
+            . '<p class="t">' . render_body($post['body']) . '</p>'
+            . '<div class="f"><span>' . (int)$post['likes'] . ' likes &middot; ' . (int)$post['replies'] . ' replies &middot; ' . (int)$post['reposts'] . ' reposts</span><a class="w" href="?p=status&amp;id=' . (int)$post['id'] . '">' . h($CFG['site_name']) . '</a></div></div>';
+    }
+    echo '<script>function s(){parent.postMessage({wuphf:"h",id:' . (int)$id . ',h:Math.ceil(document.body.getBoundingClientRect().height)+4},"*")}addEventListener("load",s);addEventListener("resize",s);new Image().onload=s;</script></body></html>';
+    exit;
+
 case 'tag':
     $tag = mb_strtolower(trim((string)($_GET['t'] ?? '')), 'UTF-8');
     page_head('#' . $tag); echo '<h1>#' . h($tag) . '</h1>';

@@ -726,7 +726,7 @@ function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
             . act_button($viewer, 'repost', $pid, (int)$p['reposts'], isset($reposted[$pid]), 'Repost', 'repeat', 'repost')
             . act_button($viewer, 'like', $pid, (int)$p['likes'], ($react[$pid] ?? 0) === 1, 'Like', 'heart', 'react', '1')
             . act_button($viewer, 'dislike', $pid, (int)$p['dislikes'], ($react[$pid] ?? 0) === -1, 'Dislike', 'down', 'react', '-1')
-            . '<button type="button" class="act" data-share="' . h(permalink($pid)) . '" data-text="' . h(mb_substr($p['body'], 0, 100)) . '" aria-label="Share" title="Share">' . icon('share') . '</button>'
+            . '<button type="button" class="act" data-share="' . h(permalink($pid)) . '" data-text="' . h(mb_substr($p['body'], 0, 100)) . '" data-body="' . h($p['body']) . '" data-user="' . h($p['username']) . '" data-pid="' . $pid . '" data-hue="' . (crc32(strtolower($p['username'])) % 360) . '" data-when="' . h(date('M j, Y', (int)$p['created'])) . '" data-av="' . ((int)$p['avatar_v'] > 0 ? h('avatars/' . (int)$p['uid'] . '.' . ($p['avatar_ext'] === 'gif' ? 'gif' : 'jpg') . '?v=' . (int)$p['avatar_v']) : '') . '" data-embed="' . h(site_url() . '/?p=embed&id=' . $pid) . '" data-embedjs="' . h(site_url() . '/assets/embed.js') . '" aria-label="Share" title="Share">' . icon('share') . '</button>'
             . '</div>';
         echo '</div></article>';
     }

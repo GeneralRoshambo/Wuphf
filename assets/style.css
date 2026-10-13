@@ -328,3 +328,18 @@ input.mini:not([type=hidden]):not([type=file]):not([type=checkbox]){width:9.5em;
 .cropz{width:240px}
 #avprev[hidden]{display:none}
 .cropper .cropz{width:240px!important;max-width:100%;padding:0;border:0}
+
+/* share sheet */
+.noscroll{overflow:hidden}
+.sheet{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;padding:0}
+.sheet[hidden]{display:none}
+.sheetbox{position:relative;background:var(--surface);color:var(--fg);width:100%;max-width:560px;max-height:94vh;overflow:auto;border-radius:20px 20px 0 0;padding:18px 18px 22px;display:flex;flex-direction:column;gap:12px}
+@media(min-width:600px){.sheet{align-items:center}.sheetbox{border-radius:20px}}
+.sheetbox h2{margin:0;font-size:1.05rem}
+.sheetx{position:absolute;right:10px;top:8px;border:0;background:none;color:var(--mute);font-size:28px;line-height:1;cursor:pointer;padding:4px 10px}
+#sharecv{width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chips button{border:1px solid var(--line);background:var(--chip);color:var(--fg);border-radius:999px;padding:6px 14px;font:inherit;font-size:.85rem;cursor:pointer}
+.chips button.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.sheetacts{display:flex;gap:8px;flex-wrap:wrap}
+.sheetacts .ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}

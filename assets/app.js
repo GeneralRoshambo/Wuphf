@@ -166,12 +166,121 @@ function copyText(t) {
     a.remove();
   });
 }
-document.addEventListener('click', function (e) {
-  var b = e.target.closest ? e.target.closest('[data-share]') : null; if (!b) return;
-  var url = b.dataset.share;
-  if (navigator.share) { navigator.share({ title: document.title, text: b.dataset.text, url: url }).catch(function () {}); return; }
-  copyText(url).then(function () { toast('Link copied'); }, function () { toast(url); });
-});
+// Share sheet: link, embed code, and a downloadable picture of the post.
+(function () {
+  var sheet = null, cv, ctx, st = { style: 'light', shape: 'wide' }, cur = null, avImg = null;
+  var STYLES = {
+    light:  { name: 'Light',  bg: ['#eef2ff', '#dbe6ff'], card: '#ffffff', fg: '#0e0e10', mute: '#6c6c75', accent: '#1d5bff', line: 'rgba(14,14,16,.08)' },
+    dark:   { name: 'Dark',   bg: ['#0b0b0d', '#1a1a22'], card: '#17171b', fg: '#f4f4f5', mute: '#9a9aa5', accent: '#6f9bff', line: 'rgba(255,255,255,.09)' },
+    blue:   { name: 'Blue',   bg: ['#1d5bff', '#0a2fa8'], card: 'rgba(255,255,255,.12)', fg: '#ffffff', mute: 'rgba(255,255,255,.72)', accent: '#ffffff', line: 'rgba(255,255,255,.22)' },
+    sunset: { name: 'Sunset', bg: ['#ff8a5c', '#c2328f'], card: 'rgba(255,255,255,.16)', fg: '#ffffff', mute: 'rgba(255,255,255,.78)', accent: '#fff3c4', line: 'rgba(255,255,255,.26)' }
+  };
+  var FONT = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif';
+
+  function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+
+  function layout(c, text, maxW, maxH, size) {   // wrap into coloured word runs, shrinking the type until it fits
+    for (; size >= 22; size -= 2) {
+      c.font = '600 ' + size + 'px ' + FONT;
+      var lines = [], line = [], w = 0, space = c.measureText(' ').width;
+      text.split('\n').forEach(function (para, pi) {
+        if (pi) { lines.push(line); line = []; w = 0; }
+        para.split(/\s+/).filter(Boolean).forEach(function (word) {
+          var ww = c.measureText(word).width;
+          if (w && w + space + ww > maxW) { lines.push(line); line = []; w = 0; }
+          line.push({ t: word, w: ww, tag: /^[@#]/.test(word) }); w += (w ? space : 0) + ww;
+        });
+      });
+      lines.push(line);
+      if (lines.length * size * 1.32 <= maxH) return { lines: lines, size: size, space: space };
+    }
+    return { lines: lines, size: 22, space: space };
+  }
+
+  function draw() {
+    if (!cur) return;
+    var S = STYLES[st.style], wide = st.shape === 'wide', W = wide ? 1200 : 1080, H = wide ? 630 : 1080, k = 2;
+    cv.width = W * k; cv.height = H * k; ctx = cv.getContext('2d'); ctx.setTransform(k, 0, 0, k, 0, 0);
+    var g = ctx.createLinearGradient(0, 0, W, H); g.addColorStop(0, S.bg[0]); g.addColorStop(1, S.bg[1]); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // soft glow
+    var rg = ctx.createRadialGradient(W * .85, H * .1, 10, W * .85, H * .1, W * .6); rg.addColorStop(0, 'rgba(255,255,255,.22)'); rg.addColorStop(1, 'rgba(255,255,255,0)'); ctx.fillStyle = rg; ctx.fillRect(0, 0, W, H);
+    var m = wide ? 56 : 64, cx = m, cy = m, cw = W - 2 * m, ch = H - 2 * m;
+    ctx.save(); ctx.shadowColor = 'rgba(0,0,0,.22)'; ctx.shadowBlur = 40; ctx.shadowOffsetY = 16;
+    rr(ctx, cx, cy, cw, ch, 36); ctx.fillStyle = S.card; ctx.fill(); ctx.restore();
+    rr(ctx, cx + .5, cy + .5, cw - 1, ch - 1, 36); ctx.strokeStyle = S.line; ctx.lineWidth = 1.5; ctx.stroke();
+    var pad = wide ? 48 : 56, x = cx + pad, y = cy + pad, av = 76;
+    // avatar
+    ctx.save(); ctx.beginPath(); ctx.arc(x + av / 2, y + av / 2, av / 2, 0, 7); ctx.clip();
+    if (avImg && avImg.naturalWidth) ctx.drawImage(avImg, x, y, av, av);
+    else { ctx.fillStyle = 'hsl(' + (cur.hue) + ',45%,45%)'; ctx.fillRect(x, y, av, av); ctx.fillStyle = '#fff'; ctx.font = '700 38px ' + FONT; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(cur.user[0].toUpperCase(), x + av / 2, y + av / 2 + 2); }
+    ctx.restore(); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = S.fg; ctx.font = '800 32px ' + FONT; ctx.fillText('@' + cur.user, x + av + 20, y + 34);
+    ctx.fillStyle = S.mute; ctx.font = '500 24px ' + FONT; ctx.fillText(cur.when, x + av + 20, y + 68);
+    // quote mark
+    ctx.fillStyle = S.accent; ctx.globalAlpha = .18; ctx.font = '900 150px Georgia,serif'; ctx.textAlign = 'right'; ctx.fillText('”', cx + cw - pad + 10, y + 100); ctx.globalAlpha = 1; ctx.textAlign = 'left';
+    // body
+    var top = y + av + 28, foot = 64, maxH = cy + ch - pad - foot - top, maxW = cw - 2 * pad;
+    var L = layout(ctx, cur.body, maxW, maxH, wide ? 60 : 72), lh = L.size * 1.32, yy = top + L.size;
+    ctx.font = '600 ' + L.size + 'px ' + FONT;
+    L.lines.forEach(function (line, li) {
+      var xx = x; line.forEach(function (wd) { ctx.fillStyle = wd.tag ? S.accent : S.fg; ctx.fillText(wd.t, xx, yy + li * lh); xx += wd.w + L.space; });
+    });
+    // footer: brand
+    var fy = cy + ch - pad + 4;
+    ctx.fillStyle = S.fg; ctx.font = '800 36px ' + FONT; ctx.fillText('Wuphf', x, fy);
+    ctx.fillStyle = S.mute; ctx.font = '500 24px ' + FONT; ctx.textAlign = 'right'; ctx.fillText(location.host, cx + cw - pad, fy - 2); ctx.textAlign = 'left';
+  }
+
+  function build() {
+    sheet = document.createElement('div'); sheet.id = 'sharesheet'; sheet.className = 'sheet'; sheet.hidden = true;
+    sheet.innerHTML = '<div class="sheetbox" role="dialog" aria-modal="true" aria-label="Share this Wuphf">'
+      + '<button type="button" class="sheetx" aria-label="Close">&times;</button><h2>Share this Wuphf</h2>'
+      + '<canvas id="sharecv"></canvas>'
+      + '<div class="chips" id="stylechips"></div>'
+      + '<div class="chips" id="shapechips"><button type="button" data-shape="wide" class="on">Wide</button><button type="button" data-shape="square">Square</button></div>'
+      + '<div class="sheetacts"><button type="button" class="btn" id="dlimg">Download image</button><button type="button" class="btn ghost" id="cplink">Copy link</button><button type="button" class="btn ghost" id="cpembed">Copy embed code</button><button type="button" class="btn ghost" id="nshare">Share…</button></div></div>';
+    document.body.appendChild(sheet);
+    cv = sheet.querySelector('#sharecv');
+    var chips = sheet.querySelector('#stylechips');
+    Object.keys(STYLES).forEach(function (k) { var b = document.createElement('button'); b.type = 'button'; b.dataset.style = k; b.textContent = STYLES[k].name; if (k === st.style) b.className = 'on'; chips.appendChild(b); });
+    sheet.addEventListener('click', function (e) {
+      var t = e.target;
+      if (t === sheet || t.closest('.sheetx')) { close(); return; }
+      if (t.dataset.style) { st.style = t.dataset.style; sel('#stylechips', 'style'); draw(); }
+      else if (t.dataset.shape) { st.shape = t.dataset.shape; sel('#shapechips', 'shape'); draw(); }
+      else if (t.id === 'dlimg') {
+        draw(); cv.toBlob(function (b) { var a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'wuphf-' + cur.user + '-' + cur.pid + '.png'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000); toast('Image saved'); }, 'image/png');
+      }
+      else if (t.id === 'cplink') copyText(cur.url).then(function () { toast('Link copied'); }, function () { toast(cur.url); });
+      else if (t.id === 'cpembed') {
+        var code = '<iframe class="wuphf-embed" src="' + cur.embed + '" width="550" height="230" style="border:0;max-width:100%" loading="lazy" title="Wuphf by @' + cur.user + '"></iframe>\n<script async src="' + cur.js + '"><\/script>';
+        copyText(code).then(function () { toast('Embed code copied'); }, function () { toast('Could not copy'); });
+      }
+      else if (t.id === 'nshare') navigator.share({ title: document.title, text: cur.text, url: cur.url }).catch(function () {});
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !sheet.hidden) close(); });
+    if (!navigator.share) sheet.querySelector('#nshare').remove();
+  }
+  function sel(id, key) { sheet.querySelectorAll(id + ' button').forEach(function (b) { b.classList.toggle('on', b.dataset[key] === st[key]); }); }
+  function close() { sheet.hidden = true; document.body.classList.remove('noscroll'); }
+
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('[data-share]') : null; if (!b) return;
+    var d = b.dataset;
+    cur = { url: d.share, text: d.text, body: d.body || d.text, user: d.user || '', pid: d.pid, when: d.when || '', embed: d.embed, js: d.embedjs, hue: parseInt(d.hue, 10) || 0 };
+    if (!cur.user || !HTMLCanvasElement.prototype.toBlob) {   // no data for a picture: fall back to the plain share
+      if (navigator.share) { navigator.share({ title: document.title, text: d.text, url: d.share }).catch(function () {}); return; }
+      copyText(d.share).then(function () { toast('Link copied'); }, function () { toast(d.share); }); return;
+    }
+    if (!sheet) build();
+    sheet.hidden = false; document.body.classList.add('noscroll');
+    avImg = null;
+    if (d.av) { var im = new Image(); im.onload = function () { avImg = im; draw(); }; im.src = d.av; }
+    draw();
+    var fonts = document.fonts && document.fonts.ready; if (fonts) fonts.then(draw);
+    sheet.querySelector('.btn').focus();
+  });
+})();
 
 // Close an open three-dot menu when you click elsewhere or press Escape.
 document.addEventListener('click', function (e) {
