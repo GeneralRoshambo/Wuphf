@@ -11,6 +11,7 @@ if ($route === 'sitemap') render_sitemap();
 if ($route === 'robots') render_robots();
 if ($route === 'blogfeed') blog_feed();
 $u     = me();
+publish_due();
 
 // ---- POST actions -------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -327,7 +328,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $do = (string)($_POST['do'] ?? '');
         $rid = (int)($_POST['rid'] ?? 0);
         $done = fn() => $rid ? q("UPDATE reports SET status = ?, handled_by = ?, handled_at = ? WHERE id = ?", [$do === 'dismiss' ? 'dismissed' : 'resolved', $u['username'], time(), $rid]) : null;
-        if (($cmsRes = admin_cms_post($do, $u)) !== null) { flash($cmsRes[1], $cmsRes[2] ? 'ok' : ''); go($cmsRes[0]); }
+        if (($cmsRes = admin_schedule_post($do, $u)) !== null || ($cmsRes = admin_cms_post($do, $u)) !== null) { flash($cmsRes[1], $cmsRes[2] ? 'ok' : ''); go($cmsRes[0]); }
         if ($do === 'backup') {
             $tmp = dirname($CFG['db_file']) . '/backup-' . bin2hex(random_bytes(6)) . '.sqlite';
             if (!backup_to($tmp)) { flash('Could not create a backup.'); go('?p=admin&tab=backup'); }

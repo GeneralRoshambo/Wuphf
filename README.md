@@ -90,3 +90,5 @@ To deploy automatically on every push to `main` (and the working branch listed i
 See `config.php` (site name, close registration, page size, post cooldown, `edit_window`: seconds an author can edit a post, default 300). The build number shows only to admins (page footer); `build.txt` is blocked from direct web access. Profile photos (JPEG/PNG) are framed and cropped in the browser before upload; animated GIFs are uploaded unchanged.
 
 Embeds and share images: the share button on every post opens a sheet with a downloadable picture of the post (four styles, wide or square) and copyable embed code. Embeds are plain iframes of `?p=embed&id=N` (add `&theme=dark` or `&theme=light` to force a theme); `assets/embed.js` is optional and resizes them to fit.
+
+Scheduling (admins only): Admin > Schedule queues posts for a future time, optionally as another member. No cron needed: due posts go live on the next page load after their time. Members never see any trace of the feature.

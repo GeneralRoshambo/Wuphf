@@ -292,12 +292,12 @@ function page_static(string $n): void {
 }
 
 function page_admin(array $u): void {
-    $tab = in_array($_GET['tab'] ?? '', ['users', 'names', 'content', 'seo', 'redirects', 'backup'], true) ? $_GET['tab'] : 'reports';
+    $tab = in_array($_GET['tab'] ?? '', ['users', 'names', 'content', 'schedule', 'seo', 'redirects', 'backup'], true) ? $_GET['tab'] : 'reports';
     if ($tab === 'content' && (isset($_GET['edit']) || isset($_GET['new']))) $GLOBALS['wide'] = true;
     $open = (int)q("SELECT COUNT(*) FROM reports WHERE status = 'open'")->fetchColumn();
     page_head('Admin');
     echo '<h1>Admin</h1><div class="tabs admintabs">';
-    foreach (['reports' => 'Reports' . ($open ? " ($open)" : ''), 'users' => 'Accounts', 'content' => 'Content', 'seo' => 'SEO', 'redirects' => 'Redirects', 'names' => 'Names', 'backup' => 'Backup'] as $k => $l)
+    foreach (['reports' => 'Reports' . ($open ? " ($open)" : ''), 'users' => 'Accounts', 'content' => 'Content', 'schedule' => 'Schedule', 'seo' => 'SEO', 'redirects' => 'Redirects', 'names' => 'Names', 'backup' => 'Backup'] as $k => $l)
         echo '<a href="?p=admin&amp;tab=' . $k . '" class="' . ($tab === $k ? 'on' : '') . '">' . h($l) . '</a>';
     echo '</div>';
     $csrf = '<input type="hidden" name="csrf" value="' . csrf() . '">';
@@ -347,6 +347,8 @@ function page_admin(array $u): void {
         }
     } elseif ($tab === 'content') {
         admin_content($u);
+    } elseif ($tab === 'schedule') {
+        admin_schedule_tab($u);
     } elseif ($tab === 'seo') {
         admin_seo();
     } elseif ($tab === 'redirects') {

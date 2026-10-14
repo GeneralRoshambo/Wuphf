@@ -812,3 +812,4 @@ function compose_box(int $replyTo = 0, string $prefill = ''): void {
 require __DIR__ . '/extras.php';
 require __DIR__ . '/cms.php';
 require __DIR__ . '/cms_admin.php';
+require __DIR__ . '/schedule.php';
