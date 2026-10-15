@@ -226,6 +226,7 @@ function admin_cms_save_inner(array $u): array {
 function admin_seo(): void {
     $v = fn($k) => h(setting($k));
     $chk = fn($k) => setting($k) === '1' ? ' checked' : '';
+    echo '<p class="hint">Link preview images: ' . (card_ready() ? '<b>working</b>. Posts and profiles get a drawn card when their link is shared.' : '<b>not available</b> on this server (PHP GD with FreeType is needed), so the site-wide card is used instead.') . '</p>';
     echo '<form method="post" action="?p=admin" class="seoform">' . admin_csrf() . '<input type="hidden" name="do" value="seo_save">';
     echo '<div class="card"><h2>Titles and descriptions</h2>'
         . '<label>Title template <span class="hint">Used for pages without their own meta title. Variables: %title% and %site%</span><input name="seo_title_tpl" value="' . $v('seo_title_tpl') . '" maxlength="120"></label>'

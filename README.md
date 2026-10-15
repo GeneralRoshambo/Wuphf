@@ -97,3 +97,5 @@ Email digests: members can choose Daily or Weekly in Settings (off by default). 
 Followers and Following lists are linked from every profile's counts. Typing `@` in a post box suggests usernames (people you follow first).
 
 Drafts: unsent posts and replies are kept in the browser (localStorage) and restored after a refresh. Pinning: the three-dot menu on your own top-level posts has Pin to profile (one at a time). New posts pill: feeds check every 45 seconds and show "N new posts" without moving the page.
+
+Link previews: pasting a post, profile or site link into Slack, iMessage, X etc. shows a drawn 1200x630 card (`?p=card&id=N`, `&u=name`, or none for the site; `&s=light|dark|blue|sunset` picks a style, default blue). Drawn by PHP GD with FreeType using the bundled Inter font in assets/fonts, cached in data/cards/ (old ones are tidied after 30 days) and re-drawn when a post is edited. If the server cannot draw (see Admin > SEO), the static assets/og-default.png is used. Set a default image in Admin > SEO to override the site card.

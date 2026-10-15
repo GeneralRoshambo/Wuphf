@@ -839,3 +839,4 @@ require __DIR__ . '/cms.php';
 require __DIR__ . '/cms_admin.php';
 require __DIR__ . '/schedule.php';
 require __DIR__ . '/digest.php';
+require __DIR__ . '/card.php';

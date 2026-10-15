@@ -5,3 +5,4 @@ data/backup-*.sqlite
 data/backups/
 data/outbox.log
 data/sessions/
+data/cards/

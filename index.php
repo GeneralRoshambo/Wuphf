@@ -493,6 +493,7 @@ case 'user':
     $isF = $u && q('SELECT 1 FROM follows WHERE follower = ? AND followee = ?', [$u['id'], $prof['id']])->fetch();
     page_head('@' . $prof['username'], ['canonical' => profile_url($prof['username']),
         'description' => $prof['bio'] !== '' ? seo_trim($prof['bio'], 160) : 'Posts by @' . $prof['username'] . ' on ' . $CFG['site_name'] . '.',
+        'og_image' => (int)$prof['is_suspended'] ? '' : card_image(['u' => $prof['username']]),
         'robots' => (int)$prof['is_suspended'] ? 'noindex, nofollow' : '']); ?>
 <section class="profile">
 <?= avatar($prof, 96) ?>
@@ -541,7 +542,7 @@ case 'status':
         array_unshift($chain, $cur);
     }
     page_head('@' . $post['username'] . ': ' . mb_substr($post['body'], 0, 30),
-        ['description' => $post['body'], 'url' => permalink($id), 'type' => 'article']);
+        ['description' => $post['body'], 'url' => permalink($id), 'type' => 'article', 'og_image' => card_image(['id' => $id])]);
     echo '<p class="crumb"><a class="back" href="./" data-back>&larr; Back</a></p>';
     $depth = chain_open($chain, $u);
     echo '<div class="focus">'; render_posts([$post], $u, true); echo '</div>';
@@ -593,6 +594,9 @@ case 'newposts':
     if ($u) { $w .= ' AND p.user_id <> ?2'; $args[] = $u['id']; }
     if ($scope === 'following' && $u) { $w .= ' AND p.user_id IN (SELECT followee FROM follows WHERE follower = ?2)'; }
     json_out(['n' => (int)q("SELECT COUNT(*) FROM posts p WHERE $w", $args)->fetchColumn()]);
+
+case 'card':
+    serve_card();
 
 case 'mentions':
     if (!$u) json_out(['users' => []], 401);

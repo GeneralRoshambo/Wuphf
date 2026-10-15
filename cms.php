@@ -284,7 +284,7 @@ function seo_head(string $title, array $meta): void {
     $canon = $meta['canonical'] ?? $meta['url'] ?? null;
     $robots = $meta['robots'] ?? ((in_array($route, NOINDEX_ROUTES, true) || isset($_GET['before'])) ? 'noindex, follow' : '');
     if (setting('seo_noindex_site') === '1') $robots = 'noindex, nofollow';
-    $image = abs_url($meta['og_image'] ?? '') ?: abs_url(setting('seo_default_image'));
+    $image = abs_url($meta['og_image'] ?? '') ?: abs_url(setting('seo_default_image')) ?: site_url() . '/assets/og-default.png';
     $ogTitle = $meta['og_title'] ?? $full; $ogDesc = $meta['og_desc'] ?? $desc;
     $card = $meta['twitter_card'] ?? ($image ? 'summary_large_image' : 'summary');
     echo '<title>' . h($full) . "</title>\n";
@@ -296,7 +296,7 @@ function seo_head(string $title, array $meta): void {
     if ($ogDesc !== '') echo '<meta property="og:description" content="' . h($ogDesc) . "\">\n";
     echo '<meta property="og:type" content="' . h($meta['og_type'] ?? $meta['type'] ?? 'website') . "\">\n";
     if ($canon) echo '<meta property="og:url" content="' . h($canon) . "\">\n";
-    if ($image) echo '<meta property="og:image" content="' . h($image) . "\">\n";
+    if ($image) echo '<meta property="og:image" content="' . h($image) . "\">\n" . (strpos($image, 'p=card') !== false || strpos($image, 'og-default.png') !== false ? '<meta property="og:image:width" content="1200">' . "\n" . '<meta property="og:image:height" content="630">' . "\n" : '');
     if (!empty($meta['article'])) {
         $a = $meta['article'];
         echo '<meta property="article:published_time" content="' . h(gmdate('c', (int)$a['published'])) . "\">\n";
