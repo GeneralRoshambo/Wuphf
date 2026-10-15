@@ -61,7 +61,7 @@
           + '<span class="hint">Drag to position, slide to zoom. This is how your photo will be cut.</span>';
         prev.parentNode.insertBefore(box, prev.nextSibling);
         var v = box.querySelector('.cropv'), z = box.querySelector('.cropz');
-        im.className = 'cropimg'; im.draggable = false; v.appendChild(im);
+        im.className = 'cropimg'; im.alt = 'Your photo, being cropped'; im.draggable = false; v.appendChild(im);
         var base = S / Math.min(im.naturalWidth, im.naturalHeight);
         crop = { img: im, S: S, base: base, z: 1, x: 0, y: 0 };
         function place() {
@@ -258,11 +258,22 @@ function copyText(t) {
       }
       else if (t.id === 'nshare') navigator.share({ title: document.title, text: cur.text, url: cur.url }).catch(function () {});
     });
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !sheet.hidden) close(); });
+    document.addEventListener('keydown', function (e) {
+      if (sheet.hidden) return;
+      if (e.key === 'Escape') close();
+      else if (e.key === 'Tab') {   // keep Tab inside the dialog
+        var f = Array.prototype.filter.call(sheet.querySelectorAll('button,a[href],input,select,textarea'), function (x) { return !x.disabled && x.offsetParent !== null; });
+        if (!f.length) return; var first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+        else if (!sheet.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+      }
+    });
     if (!navigator.share) sheet.querySelector('#nshare').remove();
   }
   function sel(id, key) { sheet.querySelectorAll(id + ' button').forEach(function (b) { b.classList.toggle('on', b.dataset[key] === st[key]); }); }
-  function close() { sheet.hidden = true; document.body.classList.remove('noscroll'); }
+  var lastFocus = null;
+  function close() { sheet.hidden = true; document.body.classList.remove('noscroll'); if (lastFocus && lastFocus.focus) lastFocus.focus(); }
 
   document.addEventListener('click', function (e) {
     var b = e.target.closest ? e.target.closest('[data-share]') : null; if (!b) return;
@@ -273,7 +284,7 @@ function copyText(t) {
       copyText(d.share).then(function () { toast('Link copied'); }, function () { toast(d.share); }); return;
     }
     if (!sheet) build();
-    sheet.hidden = false; document.body.classList.add('noscroll');
+    lastFocus = b; sheet.hidden = false; document.body.classList.add('noscroll');
     avImg = null;
     if (d.av) { var im = new Image(); im.onload = function () { avImg = im; draw(); }; im.src = d.av; }
     draw();
@@ -345,14 +356,15 @@ document.addEventListener('click', function (e) {
     var before = t.value.slice(0, t.selectionStart), m = /(^|[^\w@])@([A-Za-z0-9_]{0,15})$/.exec(before);
     return m ? { q: m[2], start: before.length - m[2].length - 1 } : null;
   }
-  function hide() { if (pop) pop.hidden = true; items = []; }
+  function hide() { if (pop) pop.hidden = true; items = []; if (ta) ta.removeAttribute('aria-activedescendant'); }
   function render() {
-    if (!pop) { pop = document.createElement('div'); pop.className = 'mpop'; pop.setAttribute('role', 'listbox'); document.body.appendChild(pop);
+    if (!pop) { pop = document.createElement('div'); pop.id = 'mpop'; pop.className = 'mpop'; pop.setAttribute('role', 'listbox'); pop.setAttribute('aria-label', 'Mention suggestions'); (document.querySelector('main') || document.body).appendChild(pop);
       pop.addEventListener('mousedown', function (e) { var li = e.target.closest('[data-i]'); if (li) { e.preventDefault(); pick(+li.dataset.i); } }); }
-    if (!items.length || !ta) { pop.hidden = true; return; }
+    if (!items.length || !ta) { pop.hidden = true; if (ta) ta.removeAttribute('aria-activedescendant'); return; }
+    ta.setAttribute('aria-autocomplete', 'list'); ta.setAttribute('aria-controls', 'mpop'); ta.setAttribute('aria-activedescendant', 'mi' + idx);
     pop.innerHTML = ''; 
     items.forEach(function (u, n) {
-      var li = document.createElement('div'); li.className = 'mi' + (n === idx ? ' on' : ''); li.dataset.i = n; li.setAttribute('role', 'option');
+      var li = document.createElement('div'); li.className = 'mi' + (n === idx ? ' on' : ''); li.id = 'mi' + n; li.dataset.i = n; li.setAttribute('role', 'option'); li.setAttribute('aria-selected', n === idx ? 'true' : 'false');
       var av = u.av ? '<img class="av" width="24" height="24" alt="" src="' + u.av + '">' : '<span class="av ph" style="width:24px;height:24px;line-height:24px;font-size:12px;background:hsl(' + u.hue + ',45%,45%)">' + u.u[0].toUpperCase() + '</span>';
       li.innerHTML = av + '<b></b>'; li.querySelector('b').textContent = '@' + u.u; pop.appendChild(li);
     });

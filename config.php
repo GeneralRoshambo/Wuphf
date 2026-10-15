@@ -15,6 +15,7 @@ $config = [
     'admins'       => [],            // usernames allowed to use the admin pages, e.g. ['wuphf'] (set in config.local.php)
     'admin_email'  => '',            // optional: get an email when someone reports a post or account
     'contact_email'=> '',            // optional: shown on the Rules and Privacy pages
+    'signup_min_seconds' => getenv('WUPHF_SIGNUP_MIN') !== false ? (int)getenv('WUPHF_SIGNUP_MIN') : 2,   // forms submitted faster than this are treated as bots
     'cron_key'     => '',            // optional: set a secret and call /?p=cron&key=SECRET from cron for exact-time scheduled posts and digests
     'edit_window'  => 300,           // seconds an author can edit a post after posting
     'min_post_gap' => 5,             // seconds a user must wait between posts

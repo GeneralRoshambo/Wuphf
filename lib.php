@@ -26,6 +26,8 @@ function db(): PDO {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
     $pdo->exec('PRAGMA foreign_keys = ON');
+    $pdo->exec('PRAGMA busy_timeout = 8000');
+    try { if ($pdo->query('PRAGMA journal_mode')->fetchColumn() !== 'wal') $pdo->query('PRAGMA journal_mode = WAL')->fetch(); $pdo->exec('PRAGMA synchronous = NORMAL'); } catch (Throwable $e) {}   // WAL: readers no longer wait for writers
     $pdo->exec('CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -70,8 +72,10 @@ function db(): PDO {
     $pdo->exec('CREATE TABLE IF NOT EXISTS throttle (k TEXT NOT NULL, t INTEGER NOT NULL)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS throttle_k ON throttle(k, t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS posts_user ON posts(user_id, id)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS posts_repost ON posts(repost_of) WHERE repost_of IS NOT NULL');
     if (!in_array('repost_of', $have('posts'))) $pdo->exec('ALTER TABLE posts ADD COLUMN repost_of INTEGER REFERENCES posts(id) ON DELETE CASCADE');
     if (!in_array('pinned_post', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN pinned_post INTEGER');
+    if (!in_array('notify_email', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN notify_email INTEGER NOT NULL DEFAULT 0');
     if (!in_array('digest', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN digest TEXT NOT NULL DEFAULT \'off\'');
     if (!in_array('digest_at', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN digest_at INTEGER NOT NULL DEFAULT 0');
     if (!in_array('edited_at', $have('posts'))) $pdo->exec('ALTER TABLE posts ADD COLUMN edited_at INTEGER');
@@ -149,6 +153,7 @@ function db(): PDO {
         follower INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         followee INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         PRIMARY KEY (follower, followee))');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS follows_followee ON follows(followee)');
     return $pdo;
 }
 
@@ -251,17 +256,18 @@ function needs_confirm(?array $u): bool {
 function send_confirmation(array $u): bool {
     global $CFG;
     $raw = make_token((int)$u['id'], 'confirm', 172800);
-    return send_mail($u['email'], 'Confirm your email for ' . $CFG['site_name'],
-        "Hi @{$u['username']},\n\nConfirm your email address to start posting on {$CFG['site_name']}:\n\n"
-        . site_url() . "/?p=confirm&t=$raw\n\nThis link expires in 48 hours. If you did not create this account, you can ignore this email.\n");
+    return send_styled($u['email'], 'Confirm your email for ' . $CFG['site_name'], [
+        'heading' => 'Confirm your email', 'paras' => ["Hi @{$u['username']}, confirm your email address to start posting on {$CFG['site_name']}."],
+        'button' => ['Confirm email', site_url() . "/?p=confirm&t=$raw"], 'note' => 'This link expires in 48 hours. If you did not create this account, you can ignore this email.']);
 }
 
 function send_login_code(array $u): bool {
     global $CFG;
     $code = sprintf('%06d', random_int(0, 999999));
     make_token((int)$u['id'], 'login', 600, $code);
-    return send_mail($u['email'], "Your {$CFG['site_name']} login code: $code",
-        "Your {$CFG['site_name']} login code is $code\n\nIt expires in 10 minutes. If you did not try to log in, change your password.\n");
+    return send_styled($u['email'], "Your {$CFG['site_name']} login code: $code", [
+        'preheader' => "Your login code is $code", 'heading' => 'Your login code', 'paras' => ['Enter this code to finish logging in. It expires in 10 minutes.'],
+        'code' => $code, 'note' => 'If you did not try to log in, change your password.']);
 }
 
 function me(): ?array {
@@ -778,6 +784,7 @@ function page_head(string $title, array $meta = []): void {
 <meta name="apple-mobile-web-app-title" content="Wuphf">
 <?= seo_custom_html('head') ?>
 </head><body>
+<a class="skip" href="#main">Skip to content</a>
 <header><div class="bar"><a class="logo" href="./"><?= h($CFG['site_name']) ?></a><nav class="nav">
 <?php if ($u): $unread = unread_count($u); ?>
 <a href="?p=user&amp;u=<?= h($u['username']) ?>">@<?= h($u['username']) ?></a>
@@ -800,7 +807,7 @@ function page_head(string $title, array $meta = []): void {
 <form class="search" action="./" method="get" role="search"><input type="hidden" name="p" value="search">
 <input type="search" name="q" value="<?= h(($_GET['p'] ?? '') === 'search' ? ($_GET['q'] ?? '') : '') ?>" placeholder="Search" maxlength="60" aria-label="Search"></form>
 </div></header>
-<main class="col<?= !empty($GLOBALS['wide']) ? ' wide' : '' ?>">
+<main id="main" tabindex="-1" class="col<?= !empty($GLOBALS['wide']) ? ' wide' : '' ?>">
 <?php if ($m = flash()): ?><div class="flash <?= h($m['k']) ?>" role="status"><?= h($m['m']) ?></div><?php endif;
 if (needs_confirm($u)): ?><div class="flash banner" role="status">Confirm your email to start posting. We sent a link to <b><?= h($u['email']) ?></b>.
 <form method="post" action="?p=resend" class="inl"><input type="hidden" name="csrf" value="<?= csrf() ?>"><button class="lnk">Resend link</button></form></div><?php endif;
@@ -813,8 +820,8 @@ function page_foot(): void {
     foreach (footer_pages() as $fp) $pages .= '<a href="' . h(cms_href($fp)) . '">' . h($fp['nav_label'] !== '' ? $fp['nav_label'] : $fp['title']) . '</a>';
     $extra = '';
     foreach ($GLOBALS['extra_js'] ?? [] as $js) $extra .= '<script src="assets/' . h($js) . '?v=' . asset_v('assets/' . $js) . '"></script>';
-    echo '</main><footer class="foot">' . ($pages !== '' ? '<nav class="flinks fpages" aria-label="Pages">' . $pages . '</nav>' : '') . '<nav class="flinks" aria-label="Site">' . $links . '</nav>Built by <a href="https://modularitynet.com" rel="nofollow noopener" target="_blank">Modularity Networks</a></footer>'
-        . (is_admin(me()) ? '<div class="build">Build ' . h(build_id()) . '</div>' : '') . '<div id="toast" role="status" aria-live="polite"></div>'
+    echo '</main><footer class="foot">' . ($pages !== '' ? '<nav class="flinks fpages" aria-label="Pages">' . $pages . '</nav>' : '') . '<nav class="flinks" aria-label="Site">' . $links . '</nav>Built by <a href="https://modularitynet.com" rel="nofollow noopener" target="_blank">Modularity Networks</a>' . (is_admin(me()) ? '<div class="build">Build ' . h(build_id()) . '</div>' : '') . '</footer>'
+        . '<div id="toast" role="status" aria-live="polite"></div>'
         . '<script src="assets/app.js?v=' . asset_v('assets/app.js') . '"></script>' . $extra . seo_custom_html('foot') . '</body></html>';
 }
 
@@ -840,3 +847,4 @@ require __DIR__ . '/cms_admin.php';
 require __DIR__ . '/schedule.php';
 require __DIR__ . '/digest.php';
 require __DIR__ . '/card.php';
+require __DIR__ . '/admin_tools.php';

@@ -54,7 +54,8 @@ function blocked_between(int $a, int $b): bool {
 function notify(int $to, int $actor, string $kind, ?int $post = null): void {
     if ($to === $actor) return;
     if (q('SELECT 1 FROM relations WHERE user_id = ? AND target_id = ?', [$to, $actor])->fetch()) return;   // they blocked or muted this person
-    q('INSERT OR IGNORE INTO notifications (user_id, actor_id, kind, post_id, created) VALUES (?,?,?,?,?)', [$to, $actor, $kind, $post, time()]);
+    $ins = q('INSERT OR IGNORE INTO notifications (user_id, actor_id, kind, post_id, created) VALUES (?,?,?,?,?)', [$to, $actor, $kind, $post, time()]);
+    if ($ins->rowCount() === 1 && $post && ($kind === 'reply' || $kind === 'mention')) instant_email($to, $actor, $kind, $post);
 }
 function unnotify(int $to, int $actor, string $kind, ?int $post = null): void {
     q('DELETE FROM notifications WHERE user_id = ? AND actor_id = ? AND kind = ? AND COALESCE(post_id, 0) = CAST(? AS INTEGER)', [$to, $actor, $kind, $post ?? 0]);
@@ -296,12 +297,12 @@ function page_static(string $n): void {
 }
 
 function page_admin(array $u): void {
-    $tab = in_array($_GET['tab'] ?? '', ['users', 'names', 'content', 'schedule', 'seo', 'redirects', 'backup'], true) ? $_GET['tab'] : 'reports';
+    $tab = in_array($_GET['tab'] ?? '', ['users', 'names', 'content', 'schedule', 'stats', 'seo', 'redirects', 'backup'], true) ? $_GET['tab'] : 'reports';
     if ($tab === 'content' && (isset($_GET['edit']) || isset($_GET['new']))) $GLOBALS['wide'] = true;
     $open = (int)q("SELECT COUNT(*) FROM reports WHERE status = 'open'")->fetchColumn();
     page_head('Admin');
     echo '<h1>Admin</h1><div class="tabs admintabs">';
-    foreach (['reports' => 'Reports' . ($open ? " ($open)" : ''), 'users' => 'Accounts', 'content' => 'Content', 'schedule' => 'Schedule', 'seo' => 'SEO', 'redirects' => 'Redirects', 'names' => 'Names', 'backup' => 'Backup'] as $k => $l)
+    foreach (['reports' => 'Reports' . ($open ? " ($open)" : ''), 'users' => 'Accounts', 'content' => 'Content', 'schedule' => 'Schedule', 'stats' => 'Stats', 'seo' => 'SEO', 'redirects' => 'Redirects', 'names' => 'Names', 'backup' => 'Backup'] as $k => $l)
         echo '<a href="?p=admin&amp;tab=' . $k . '" class="' . ($tab === $k ? 'on' : '') . '">' . h($l) . '</a>';
     echo '</div>';
     $csrf = '<input type="hidden" name="csrf" value="' . csrf() . '">';
@@ -347,12 +348,15 @@ function page_admin(array $u): void {
                 echo (int)$r['is_suspended'] ? $btn('unsuspend', 'Restore', $uidf) : $btn('suspend', 'Suspend', $uidf, 'Suspend this account?', 'dangerbtn');
                 echo $btn('delete_user', 'Delete', $uidf, 'Delete this account and everything it posted?', 'dangerbtn');
             }
-            echo '</div></div>';
+            echo '</div>' . (!is_admin($r) || (int)$r['id'] === (int)$u['id'] ? admin_recovery_menu($r, $csrf) : '') . '</div>';
         }
+        admin_log_view();
     } elseif ($tab === 'content') {
         admin_content($u);
     } elseif ($tab === 'schedule') {
         admin_schedule_tab($u);
+    } elseif ($tab === 'stats') {
+        admin_stats_tab();
     } elseif ($tab === 'seo') {
         admin_seo();
     } elseif ($tab === 'redirects') {
@@ -377,9 +381,7 @@ function page_admin(array $u): void {
         }
         if (!$names && !admin_names()) echo '<p class="empty">No reserved names yet.</p>';
     } else {
-        echo '<div class="card"><h2>Database backup</h2><p class="hint">Downloads a copy of the whole database (accounts, posts, everything). Keep it somewhere safe and private. '
-            . 'To also keep automatic copies on the server, see the README (it uses <code>backup.php</code> with a cPanel cron job).</p>'
-            . $btn('backup', 'Download backup now', '', '', '') . '</div>';
+        admin_backup_tab($btn);
     }
     page_foot();
 }

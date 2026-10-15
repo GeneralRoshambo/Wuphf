@@ -22,6 +22,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$CFG['allow_signup']) { flash('Registration is closed.'); go('./'); }
         $name = trim($_POST['username'] ?? ''); $pw = (string)($_POST['password'] ?? '');
         $email = strtolower(trim((string)($_POST['email'] ?? '')));
+        if (trim((string)($_POST['company'] ?? '')) !== '') { flash('Account created. Check your email to confirm it.', 'ok'); go('./'); }   // bot trap: a hidden field people never see. Pretend it worked.
+        if (time() - (int)($_POST['ft'] ?? 0) < (int)$CFG['signup_min_seconds']) { flash('That was quick. Please submit the form again.'); go('?p=register'); }
         if (!rate_ok('signup:' . client_ip(), 10, 3600)) $err = 'Too many sign-ups from your network. Try again later.';
         elseif (!preg_match('/^[A-Za-z0-9_]{3,15}$/', $name)) $err = 'Username: 3-15 letters, numbers or underscores.';
         elseif (reserved_name($name)) $err = 'That username is reserved.';
@@ -42,6 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     case 'login':
         $ip = client_ip();
         if (throttle_count('login:' . $ip, 900) >= 10) { flash('Too many failed attempts. Wait a few minutes and try again.'); go('?p=login'); }
+        $who = mb_strtolower(trim((string)($_POST['username'] ?? '')));
+        if (throttle_count('login-user:' . $who, 3600) >= 20) { flash('Too many failed attempts for that account. Wait a while, or reset the password by email.'); go('?p=login'); }
         $row = q('SELECT * FROM users WHERE username = ? OR (email <> \'\' AND lower(email) = lower(?))', [trim($_POST['username'] ?? ''), trim($_POST['username'] ?? '')])->fetch();
         $hash = $row['pass'] ?? '$2y$10$usesomesillystringforsaltuMHQxZfC8m1GkF0n2vGX5bKq6x1b2e';
         if (password_verify((string)($_POST['password'] ?? ''), $hash) && $row) {
@@ -56,6 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             go('./');
         }
         q('INSERT INTO throttle (k, t) VALUES (?,?)', ['login:' . $ip, time()]);
+        q('INSERT INTO throttle (k, t) VALUES (?,?)', ['login-user:' . $who, time()]);
         flash('Wrong username or password.'); go('?p=login');
 
     case 'verify':   // second step of login: the emailed code
@@ -86,9 +91,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $fu = q('SELECT * FROM users WHERE email <> \'\' AND lower(email) = ?', [$email])->fetch();
             if ($fu) {
                 $raw = make_token((int)$fu['id'], 'reset', 3600);
-                send_mail($fu['email'], 'Reset your ' . $CFG['site_name'] . ' password',
-                    "Hi @{$fu['username']},\n\nSomeone asked to reset your {$CFG['site_name']} password. To choose a new one, open:\n\n"
-                    . site_url() . "/?p=reset&t=$raw\n\nThis link works once and expires in 1 hour. If you did not ask for this, ignore this email and your password stays the same.\n");
+                send_styled($fu['email'], 'Reset your ' . $CFG['site_name'] . ' password', [
+                    'heading' => 'Reset your password', 'paras' => ["Hi @{$fu['username']}, someone asked to reset your {$CFG['site_name']} password. Choose a new one below."],
+                    'button' => ['Choose a new password', site_url() . "/?p=reset&t=$raw"], 'note' => 'This link works once and expires in 1 hour. If you did not ask for this, ignore this email and your password stays the same.']);
             }
         }
         // Same answer whether or not the address has an account.
@@ -120,16 +125,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         flash('Email confirmed. You can post now.', 'ok'); go('./');
 
     case 'unsub':
-        $uid = (int)($_POST['u'] ?? 0);
-        if (!hash_equals(unsub_token($uid), (string)($_POST['t'] ?? ''))) { flash('That link is not valid.'); go('./'); }
-        q("UPDATE users SET digest = 'off' WHERE id = ?", [$uid]);
-        flash('Email digests are off.', 'ok'); go('./');
+        $uid = (int)($_POST['u'] ?? 0); $uk = ($_POST['k'] ?? '') === 'instant' ? 'instant' : 'digest';
+        if (!hash_equals(unsub_token($uid, $uk), (string)($_POST['t'] ?? ''))) { flash('That link is not valid.'); go('./'); }
+        q($uk === 'instant' ? 'UPDATE users SET notify_email = 0 WHERE id = ?' : "UPDATE users SET digest = 'off' WHERE id = ?", [$uid]);
+        flash($uk === 'instant' ? 'Instant emails are off.' : 'Email digests are off.', 'ok'); go('./');
 
     case 'logout':
         $_SESSION = []; session_destroy(); go('./');
     }
 
     if (!$u) go('?p=login');
+    if (!rate_ok('writes:' . $u['id'], 900, 3600)) { http_response_code(429); if (!empty($_POST['ajax'])) json_out(['error' => 'slow'], 429); flash('Slow down a little.'); go($_SERVER['HTTP_REFERER'] ?? './'); }
 
     if (in_array($route, ['post', 'edit', 'follow', 'react', 'repost'], true) && needs_confirm($u)) {
         flash('Confirm your email first. Use "Resend link" in the banner if you need a new one.');
@@ -155,6 +161,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         elseif (len($body) > hard_max() || counted_len($body) > $CFG['max_chars'])
             flash('Too long: ' . $CFG['max_chars'] . ' characters max (@usernames are free).');
         elseif (has_link($body)) flash('Links are not allowed.');
+        elseif (!is_admin($u) && !rate_ok('posts:' . $u['id'], 60, 3600)) flash('You have posted a lot this hour. Take a break and come back soon.');
         elseif ($wait > 0) flash('Easy there. You can post again in ' . $wait . ' second' . ($wait == 1 ? '' : 's') . '.');
         else {
             q('INSERT INTO posts (user_id, body, reply_to, created) VALUES (?,?,?,?)', [$u['id'], $body, $reply ?: null, time()]);
@@ -238,6 +245,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     case 'follow':
         $t = (int)($_POST['id'] ?? 0);
+        if (empty($_POST['unfollow']) && !rate_ok('follow:' . $u['id'], 100, 3600)) { if (!empty($_POST['ajax'])) { http_response_code(429); exit; } flash('You are following people very fast. Try again later.'); go($_SERVER['HTTP_REFERER'] ?? './'); }
         if ($t !== (int)$u['id'] && q('SELECT 1 FROM users WHERE id = ?', [$t])->fetch()) {
             if (!empty($_POST['unfollow'])) { q('DELETE FROM follows WHERE follower = ? AND followee = ?', [$u['id'], $t]); unnotify($t, (int)$u['id'], 'follow'); }
             elseif (blocked_between((int)$u['id'], $t)) { flash('You cannot follow this account.'); go($_SERVER['HTTP_REFERER'] ?? './'); }
@@ -304,7 +312,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($new !== (string)($_POST['new2'] ?? '')) { flash('The two new passwords do not match.'); go('?p=account'); }
             q('UPDATE users SET pass = ?, sess = sess + 1 WHERE id = ?', [password_hash($new, PASSWORD_DEFAULT), $u['id']]);
             $_SESSION['sv'] = (int)$u['sess'] + 1;       // keep this device signed in, drop the others
-            if ($u['email'] !== '') send_mail($u['email'], 'Your ' . $CFG['site_name'] . ' password was changed', "Hi @{$u['username']},\n\nYour password was just changed and other devices were signed out. If this was not you, reset your password right away: " . site_url() . "/?p=forgot\n");
+            if ($u['email'] !== '') send_styled($u['email'], 'Your ' . $CFG['site_name'] . ' password was changed', ['heading' => 'Your password was changed', 'paras' => ["Hi @{$u['username']}, your password was just changed and other devices were signed out."], 'button' => ['Not you? Reset it now', site_url() . '/?p=forgot']]);
             flash('Password changed. Other devices were signed out.', 'ok'); go('?p=account');
         }
         if ($do === 'username') {
@@ -324,8 +332,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!rate_ok('emailchg:' . $u['id'], 5, 3600)) { flash('Too many tries. Wait a while.'); go('?p=account'); }
             q('UPDATE users SET pending_email = ? WHERE id = ?', [$ne, $u['id']]);
             $raw = make_token((int)$u['id'], 'email', 86400);
-            send_mail($ne, 'Confirm your new email for ' . $CFG['site_name'], "Hi @{$u['username']},\n\nConfirm this as your new email address:\n\n" . site_url() . "/?p=confirm&t=$raw\n\nThe link works once and expires in 24 hours. If you did not ask for this, ignore it.\n");
-            if ($u['email'] !== '') send_mail($u['email'], 'Email change requested on ' . $CFG['site_name'], "Someone (hopefully you) asked to change this account's email to $ne. Nothing changes until that address is confirmed. If this was not you, change your password.\n");
+            send_styled($ne, 'Confirm your new email for ' . $CFG['site_name'], ['heading' => 'Confirm your new email', 'paras' => ["Hi @{$u['username']}, confirm this as your new email address."], 'button' => ['Confirm new email', site_url() . "/?p=confirm&t=$raw"], 'note' => 'The link works once and expires in 24 hours. If you did not ask for this, ignore it.']);
+            if ($u['email'] !== '') send_styled($u['email'], 'Email change requested on ' . $CFG['site_name'], ['heading' => 'Email change requested', 'paras' => ["Someone (hopefully you) asked to change this account's email to $ne. Nothing changes until that address is confirmed."], 'note' => 'If this was not you, change your password.']);
             flash('We sent a confirmation link to ' . $ne . '. Your email changes when you open it.', 'ok'); go('?p=account');
         }
         if ($do === 'delete') {
@@ -342,7 +350,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $do = (string)($_POST['do'] ?? '');
         $rid = (int)($_POST['rid'] ?? 0);
         $done = fn() => $rid ? q("UPDATE reports SET status = ?, handled_by = ?, handled_at = ? WHERE id = ?", [$do === 'dismiss' ? 'dismissed' : 'resolved', $u['username'], time(), $rid]) : null;
-        if (($cmsRes = admin_schedule_post($do, $u)) !== null || ($cmsRes = admin_cms_post($do, $u)) !== null) { flash($cmsRes[1], $cmsRes[2] ? 'ok' : ''); go($cmsRes[0]); }
+        if (($cmsRes = admin_tools_post($do, $u)) !== null || ($cmsRes = admin_schedule_post($do, $u)) !== null || ($cmsRes = admin_cms_post($do, $u)) !== null) { flash($cmsRes[1], $cmsRes[2] ? 'ok' : ''); go($cmsRes[0]); }
         if ($do === 'backup') {
             $tmp = dirname($CFG['db_file']) . '/backup-' . bin2hex(random_bytes(6)) . '.sqlite';
             if (!backup_to($tmp)) { flash('Could not create a backup.'); go('?p=admin&tab=backup'); }
@@ -398,8 +406,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($tf && !(int)$u['email_ok']) { flash('Confirm your email before turning on login codes.'); go('?p=settings'); }
         $dg = in_array($_POST['digest'] ?? '', ['off', 'daily', 'weekly'], true) ? $_POST['digest'] : 'off';
         if ($dg !== 'off' && !(int)$u['email_ok']) { flash('Confirm your email before turning on digests.'); go('?p=settings'); }
+        $ne2 = !empty($_POST['notify_email']) ? 1 : 0;
+        if ($ne2 && !(int)$u['email_ok']) { flash('Confirm your email before turning on instant emails.'); go('?p=settings'); }
         $dgAt = $dg !== $u['digest'] ? time() : (int)$u['digest_at'];   // changing it restarts the clock
-        q('UPDATE users SET bio = ?, website = ?, twofa = ?, digest = ?, digest_at = ? WHERE id = ?', [$bio, $site, $tf, $dg, $dgAt, $u['id']]);
+        q('UPDATE users SET bio = ?, website = ?, twofa = ?, digest = ?, digest_at = ?, notify_email = ? WHERE id = ?', [$bio, $site, $tf, $dg, $dgAt, $ne2, $u['id']]);
         flash('Profile saved.', 'ok'); go('?p=settings');
     }
     http_response_code(404); exit('Not found');
@@ -417,7 +427,8 @@ case 'register':
 <form method="post" action="?p=<?= $route ?>" class="card">
 <input type="hidden" name="csrf" value="<?= csrf() ?>">
 <label><?= $reg ? 'Username' : 'Username or email' ?> <input name="username" required autocomplete="username" maxlength="<?= $reg ? 15 : 120 ?>" autofocus></label>
-<?php if ($reg): ?><label>Email <input type="email" name="email" required autocomplete="email" maxlength="120"></label>
+<?php if ($reg): ?><div class="sr" aria-hidden="true"><label>Company <input name="company" tabindex="-1" autocomplete="off"></label></div><input type="hidden" name="ft" value="<?= time() ?>">
+<label>Email <input type="email" name="email" required autocomplete="email" maxlength="120"></label>
 <p class="hint">We email you a link to confirm it. We use it for password resets and login codes, never for marketing.</p><?php endif; ?>
 <label>Password <input type="password" name="password" required minlength="<?= $reg ? 8 : 1 ?>" autocomplete="<?= $reg ? 'new-password' : 'current-password' ?>"></label>
 <button class="btn"><?= $reg ? 'Create account' : 'Log in' ?></button>
@@ -543,7 +554,7 @@ case 'status':
     }
     page_head('@' . $post['username'] . ': ' . mb_substr($post['body'], 0, 30),
         ['description' => $post['body'], 'url' => permalink($id), 'type' => 'article', 'og_image' => card_image(['id' => $id])]);
-    echo '<p class="crumb"><a class="back" href="./" data-back>&larr; Back</a></p>';
+    echo '<h1 class="sr">Post by @' . h($post['username']) . '</h1><p class="crumb"><a class="back" href="./" data-back>&larr; Back</a></p>';
     $depth = chain_open($chain, $u);
     echo '<div class="focus">'; render_posts([$post], $u, true); echo '</div>';
     if ($u) {
@@ -567,17 +578,17 @@ case 'embed':
         . '@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#141414;--fg:#f2f2f3;--mute:#9a9aa3;--line:#2a2a2c;--accent:#6f9bff}}'
         . ':root[data-theme=dark]{--bg:#141414;--fg:#f2f2f3;--mute:#9a9aa3;--line:#2a2a2c;--accent:#6f9bff}'
         . '*{box-sizing:border-box}html,body{margin:0;background:transparent}body{font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--fg);padding:2px}'
-        . 'a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}'
+        . 'a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.t a{text-decoration:underline}.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);color:#000}'
         . '.c{background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:16px;max-width:560px}'
         . '.h{display:flex;align-items:center;gap:10px}.av{border-radius:50%;object-fit:cover;display:block;flex:none;color:#fff;text-align:center;font-weight:700}'
         . '.n{font-weight:700;color:var(--fg)}.m{color:var(--mute);font-size:13px}.t{margin:12px 0;font-size:18px;line-height:1.4;white-space:pre-wrap;overflow-wrap:anywhere}'
         . '.f{display:flex;justify-content:space-between;align-items:center;color:var(--mute);font-size:13px;gap:10px}.w{font-weight:800;letter-spacing:-.05em;color:var(--fg)}'
         . '</style></head><body>';
-    if (!$post) { echo '<div class="c"><span class="m">This Wuphf is no longer available.</span></div>'; }
+    if (!$post) { echo '<main><h1 class="sr">Unavailable</h1><div class="c"><span class="m">This Wuphf is no longer available.</span></div></main>'; }
     else {
-        echo '<div class="c"><div class="h"><a href="?p=user&amp;u=' . h($post['username']) . '">' . avatar($post, 40) . '</a><div><a class="n" href="?p=user&amp;u=' . h($post['username']) . '">@' . h($post['username']) . '</a><div class="m">' . h(date('M j, Y', (int)$post['created'])) . '</div></div></div>'
+        echo '<main><h1 class="sr">Post by @' . h($post['username']) . '</h1><div class="c"><div class="h"><a href="?p=user&amp;u=' . h($post['username']) . '">' . avatar($post, 40) . '</a><div><a class="n" href="?p=user&amp;u=' . h($post['username']) . '">@' . h($post['username']) . '</a><div class="m">' . h(date('M j, Y', (int)$post['created'])) . '</div></div></div>'
             . '<p class="t">' . render_body($post['body']) . '</p>'
-            . '<div class="f"><span>' . (int)$post['likes'] . ' likes &middot; ' . (int)$post['replies'] . ' replies &middot; ' . (int)$post['reposts'] . ' reposts</span><a class="w" href="?p=status&amp;id=' . (int)$post['id'] . '">' . h($CFG['site_name']) . '</a></div></div>';
+            . '<div class="f"><span>' . (int)$post['likes'] . ' likes &middot; ' . (int)$post['replies'] . ' replies &middot; ' . (int)$post['reposts'] . ' reposts</span><a class="w" href="?p=status&amp;id=' . (int)$post['id'] . '">' . h($CFG['site_name']) . '</a></div></div></main>';
     }
     echo '<script>function s(){parent.postMessage({wuphf:"h",id:' . (int)$id . ',h:Math.ceil(document.body.getBoundingClientRect().height)+4},"*")}addEventListener("load",s);addEventListener("resize",s);new Image().onload=s;</script></body></html>';
     exit;
@@ -603,10 +614,10 @@ case 'mentions':
     mention_suggestions($u);
 
 case 'unsub':
-    $uid = (int)($_GET['u'] ?? 0); $tt = (string)($_GET['t'] ?? '');
-    page_head('Email digests');
-    if (!hash_equals(unsub_token($uid), $tt)) echo '<h1>Email digests</h1><p class="empty">That link is not valid.</p>';
-    else echo '<h1>Stop email digests?</h1><form method="post" action="?p=unsub" class="card"><input type="hidden" name="csrf" value="' . csrf() . '"><input type="hidden" name="u" value="' . $uid . '"><input type="hidden" name="t" value="' . h($tt) . '"><button class="btn">Turn off digests</button></form>';
+    $uid = (int)($_GET['u'] ?? 0); $tt = (string)($_GET['t'] ?? ''); $uk = ($_GET['k'] ?? '') === 'instant' ? 'instant' : 'digest';
+    page_head('Email settings');
+    if (!hash_equals(unsub_token($uid, $uk), $tt)) echo '<h1>Email settings</h1><p class="empty">That link is not valid.</p>';
+    else echo '<h1>' . ($uk === 'instant' ? 'Stop instant emails?' : 'Stop email digests?') . '</h1><form method="post" action="?p=unsub" class="card"><input type="hidden" name="csrf" value="' . csrf() . '"><input type="hidden" name="u" value="' . $uid . '"><input type="hidden" name="k" value="' . $uk . '"><input type="hidden" name="t" value="' . h($tt) . '"><button class="btn">' . ($uk === 'instant' ? 'Turn off instant emails' : 'Turn off digests') . '</button></form>';
     page_foot(); break;
 
 case 'cron':
@@ -621,7 +632,8 @@ case 'tag':
     page_foot(); break;
 
 case 'search':
-    $qs = trim((string)($_GET['q'] ?? ''));
+    $qs = mb_substr(trim((string)($_GET['q'] ?? '')), 0, 80);
+    if ($qs !== '' && !rate_ok('search:' . ($u ? 'u' . $u['id'] : client_ip()), 120, 600)) { http_response_code(429); page_head('Search'); echo '<h1>Search</h1><p class="empty">Too many searches. Try again in a few minutes.</p>'; page_foot(); break; }
     if ($qs !== '' && $qs[0] === '#' && len($qs) > 1) go('?p=tag&t=' . urlencode(ltrim($qs, '#')));
     page_head('Search'); ?>
 <h1>Search</h1>
@@ -661,6 +673,8 @@ case 'settings':
 Ask for a login code by email each time I log in</label>
 <label>Email digest <span class="hint">A summary of replies, mentions, likes and popular posts from people you follow. Only sent when there is something to say.</span>
 <select name="digest"><?php foreach (['off' => 'Off', 'daily' => 'Daily', 'weekly' => 'Weekly'] as $dk => $dl): ?><option value="<?= $dk ?>"<?= $u['digest'] === $dk ? ' selected' : '' ?>><?= $dl ?></option><?php endforeach; ?></select></label>
+<label class="check"><input type="checkbox" name="notify_email" value="1" <?= (int)$u['notify_email'] ? 'checked' : '' ?> <?= !(int)$u['email_ok'] ? 'disabled' : '' ?>>
+Email me right away when someone replies to me or mentions me (up to 6 an hour)</label>
 <label>Profile link (shown on your profile only)
 <input type="text" inputmode="url" autocapitalize="off" name="website" value="<?= h($u['website']) ?>" maxlength="100" placeholder="https://example.com"></label>
 <button class="btn" id="savebtn">Save</button>
@@ -720,6 +734,7 @@ default:
     $tab = $_GET['tab'] ?? 'following';
     if (!in_array($tab, ['following', 'all', 'replies'], true) || !$u) $tab = $u ? 'following' : 'all';
     page_head('Home', ['title_full' => setting('seo_home_title') !== '' ? setting('seo_home_title') : $CFG['site_name'], 'description' => setting('seo_home_desc'), 'canonical' => site_url() . '/']);
+    echo '<h1 class="sr">' . h($CFG['site_name']) . ' home</h1>';
     if ($u) {
         compose_box();
         tab_bar(['following' => 'Following', 'all' => 'Everyone', 'replies' => 'Replies'], $tab, '');

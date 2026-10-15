@@ -7,8 +7,8 @@ function app_secret(): string {
     if (strlen($s) < 32) { $s = bin2hex(random_bytes(24)); set_setting('app_secret', $s); }
     return $s;
 }
-function unsub_token(int $uid): string { return hash_hmac('sha256', 'unsub:' . $uid, app_secret()); }
-function unsub_url(int $uid): string { return site_url() . '/?p=unsub&u=' . $uid . '&t=' . unsub_token($uid); }
+function unsub_token(int $uid, string $kind = 'digest'): string { return hash_hmac('sha256', ($kind === 'digest' ? 'unsub:' : 'unsub-' . $kind . ':') . $uid, app_secret()); }
+function unsub_url(int $uid, string $kind = 'digest'): string { return site_url() . '/?p=unsub&u=' . $uid . ($kind === 'digest' ? '' : '&k=' . $kind) . '&t=' . unsub_token($uid, $kind); }
 
 // ---- Digest -------------------------------------------------------------------
 const DIGEST_PERIOD = ['daily' => 86400, 'weekly' => 604800];
@@ -137,7 +137,7 @@ function page_follows(?array $viewer): void {
     $total = (int)q("SELECT COUNT(*) FROM follows f JOIN users x ON x.id = f.$them WHERE f.$me = ? AND x.id NOT IN ($ids)", [$prof['id']])->fetchColumn();
     $rows = q("SELECT x.* FROM follows f JOIN users x ON x.id = f.$them WHERE f.$me = ? AND x.id NOT IN ($ids) ORDER BY f.rowid DESC LIMIT $per OFFSET " . (($page - 1) * $per), [$prof['id']])->fetchAll();
     page_head('@' . $prof['username'] . ': ' . ($tab === 'followers' ? 'Followers' : 'Following'));
-    echo '<p class="crumb"><a class="back" href="?p=user&amp;u=' . h($prof['username']) . '">&larr; @' . h($prof['username']) . '</a></p>';
+    echo '<h1 class="sr">@' . h($prof['username']) . ' ' . ($tab === 'followers' ? 'followers' : 'following') . '</h1><p class="crumb"><a class="back" href="?p=user&amp;u=' . h($prof['username']) . '">&larr; @' . h($prof['username']) . '</a></p>';
     tab_bar(['followers' => 'Followers', 'following' => 'Following'], $tab, 'p=follows&amp;u=' . h($prof['username']) . '&amp;');
     $mine = $viewer ? following_ids($viewer) : [];
     foreach ($rows as $r) {
@@ -172,3 +172,42 @@ function mention_suggestions(array $viewer): never {
 
 // ---- "N new posts" pill -------------------------------------------------------------
 function newposts_marker(string $scope): void { echo '<div id="newpill" class="newpill" data-scope="' . h($scope) . '" hidden></div>'; }
+
+// ---- Styled transactional emails ----------------------------------------------------------
+/** Send an email in the site's look. $o: preheader, heading, paras[] (plain text), code, button [label, url], note, foot (html). */
+function send_styled(string $to, string $subject, array $o): bool {
+    global $CFG;
+    $sans = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+    $t = ($o['heading'] ?? '') . "\n\n"; $hI = '<p class="fg" style="margin:0 0 14px;font:700 22px/1.25 ' . $sans . ';color:#0e0e10">' . h($o['heading'] ?? '') . '</p>';
+    foreach ($o['paras'] ?? [] as $p) { $t .= $p . "\n\n"; $hI .= '<p class="fg" style="margin:0 0 14px;color:#0e0e10">' . h($p) . '</p>'; }
+    if (!empty($o['code'])) {
+        $t .= $o['code'] . "\n\n";
+        $hI .= '<p class="chip fg" style="margin:6px 0 18px;padding:14px 0;text-align:center;background:#f0f0f2;border-radius:12px;font:800 32px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.3em;color:#1d5bff">' . h($o['code']) . '</p>';
+    }
+    if (!empty($o['button'])) {
+        $t .= $o['button'][0] . ': ' . $o['button'][1] . "\n\n";
+        $hI .= '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:6px 0 18px"><tr><td style="background:#1d5bff;border-radius:999px"><a href="' . h($o['button'][1]) . '" style="display:inline-block;padding:12px 26px;color:#ffffff;font:700 15px ' . $sans . ';text-decoration:none">' . h($o['button'][0]) . '</a></td></tr></table>'
+            . '<p class="mute" style="margin:0 0 14px;font-size:12px;color:#6c6c75;word-break:break-all">Or copy this link: ' . h($o['button'][1]) . '</p>';
+    }
+    if (!empty($o['note'])) { $t .= $o['note'] . "\n"; $hI .= '<p class="mute" style="margin:0;font-size:13px;color:#6c6c75">' . h($o['note']) . '</p>'; }
+    $foot = $o['foot'] ?? 'You are getting this because of activity on your ' . h($CFG['site_name']) . ' account.';
+    if (!empty($o['foot_text'])) $t .= "\n-- \n" . $o['foot_text'] . "\n";
+    return send_mail($to, $subject, trim($t) . "\n", mail_shell($o['preheader'] ?? ($o['paras'][0] ?? ''), $hI, $foot));
+}
+
+/** Email someone straight away about a reply or mention, if they asked for that. */
+function instant_email(int $to, int $actor, string $kind, int $postId): void {
+    global $CFG;
+    $u = q('SELECT * FROM users WHERE id = ? AND notify_email = 1 AND email_ok = 1 AND email <> \'\' AND is_suspended = 0', [$to])->fetch();
+    if (!$u || !rate_ok('instant:' . $to, 6, 3600)) return;   // over the limit: the digest still covers it
+    $a = q('SELECT username FROM users WHERE id = ?', [$actor])->fetchColumn();
+    $body = (string)q('SELECT body FROM posts WHERE id = ?', [$postId])->fetchColumn();
+    if (!$a || $body === '') return;
+    $url = site_url() . '/?p=status&id=' . $postId;
+    $what = $kind === 'reply' ? 'replied to you' : 'mentioned you';
+    send_styled($u['email'], '@' . $a . ' ' . $what . ' on ' . $CFG['site_name'], [
+        'preheader' => mb_substr($body, 0, 90), 'heading' => '@' . $a . ' ' . $what,
+        'paras' => ['"' . mb_substr(preg_replace('/\s+/', ' ', $body), 0, 200) . '"'], 'button' => ['View on ' . $CFG['site_name'], $url],
+        'foot' => 'You asked for instant emails about replies and mentions.<br><a class="lnk" href="' . h(unsub_url((int)$u['id'], 'instant')) . '" style="color:#6c6c75">Turn these off</a>',
+        'foot_text' => 'Turn these emails off: ' . unsub_url((int)$u['id'], 'instant')]);
+}
