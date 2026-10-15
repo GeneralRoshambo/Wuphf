@@ -229,6 +229,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         q('DELETE FROM posts WHERE id = ? AND user_id = ?', [(int)($_POST['id'] ?? 0), $u['id']]);
         go($_SERVER['HTTP_REFERER'] ?? './');
 
+    case 'pin':
+        $pid = (int)($_POST['id'] ?? 0);
+        if (!empty($_POST['unpin'])) { q('UPDATE users SET pinned_post = NULL WHERE id = ? AND pinned_post = ?', [$u['id'], $pid]); flash('Unpinned.', 'ok'); go($_SERVER['HTTP_REFERER'] ?? './'); }
+        if (!q('SELECT 1 FROM posts WHERE id = ? AND user_id = ? AND reply_to IS NULL AND repost_of IS NULL', [$pid, $u['id']])->fetch()) { flash('Only your own posts can be pinned.'); go($_SERVER['HTTP_REFERER'] ?? './'); }
+        q('UPDATE users SET pinned_post = ? WHERE id = ?', [$pid, $u['id']]);
+        flash('Pinned to your profile.', 'ok'); go('?p=user&u=' . urlencode($u['username']));
+
     case 'follow':
         $t = (int)($_POST['id'] ?? 0);
         if ($t !== (int)$u['id'] && q('SELECT 1 FROM users WHERE id = ?', [$t])->fetch()) {
@@ -515,7 +522,11 @@ case 'user':
     $base = 'p=user&amp;u=' . h($prof['username']) . '&amp;';
     tab_bar(['posts' => 'Posts', 'replies' => 'Replies'], $ptab, $base);
     if ($ptab === 'replies') feed('p.reply_to IS NOT NULL AND p.user_id = ?', [$prof['id']], $base . 'tab=replies&amp;', 'No replies yet.', true);
-    else feed('p.reply_to IS NULL AND p.user_id = ?', [$prof['id']], $base, 'No posts yet.');
+    else {
+        $pin = (int)$prof['pinned_post'] ? q(POST_SELECT . ' WHERE p.id = ? AND p.user_id = ? AND p.reply_to IS NULL AND p.repost_of IS NULL', [$prof['pinned_post'], $prof['id']])->fetch() : null;
+        if ($pin && !isset($_GET['before'])) { echo '<p class="pinlabel">' . icon('pin') . ' Pinned</p><div class="pinned">'; render_posts([$pin], $u); echo '</div>'; }
+        feed('p.reply_to IS NULL AND p.user_id = ?1' . ($pin ? ' AND p.id <> ' . (int)$pin['id'] : ''), [$prof['id']], $base, 'No posts yet.');
+    }
     page_foot(); break;
 
 case 'status':
@@ -572,6 +583,16 @@ case 'embed':
 
 case 'follows':
     page_follows($u); break;
+
+case 'newposts':
+    $since = (int)($_GET['since'] ?? 0); $scope = (string)($_GET['scope'] ?? 'all');
+    if (!rate_ok('newposts:' . ($u ? $u['id'] : client_ip()), 240, 3600)) json_out(['n' => 0]);
+    $hide = visible_hidden($u); $ids = $hide ? implode(',', array_map('intval', $hide)) : '0';
+    $w = 'p.id > ?1 AND p.reply_to IS NULL AND p.repost_of IS NULL AND p.user_id NOT IN (' . $ids . ')';
+    $args = [$since];
+    if ($u) { $w .= ' AND p.user_id <> ?2'; $args[] = $u['id']; }
+    if ($scope === 'following' && $u) { $w .= ' AND p.user_id IN (SELECT followee FROM follows WHERE follower = ?2)'; }
+    json_out(['n' => (int)q("SELECT COUNT(*) FROM posts p WHERE $w", $args)->fetchColumn()]);
 
 case 'mentions':
     if (!$u) json_out(['users' => []], 401);
@@ -686,7 +707,7 @@ case 'public':
 <?php $ptab = ($_GET['tab'] ?? '') === 'replies' ? 'replies' : 'posts';
     tab_bar(['posts' => 'Posts', 'replies' => 'Replies'], $ptab, 'p=public&amp;');
     if ($ptab === 'replies') feed('p.reply_to IS NOT NULL', [], 'p=public&amp;tab=replies&amp;', 'No replies yet.', true);
-    else feed('p.reply_to IS NULL', [], 'p=public&amp;', 'No posts yet.');
+    else { newposts_marker('public'); feed('p.reply_to IS NULL', [], 'p=public&amp;', 'No posts yet.'); }
     page_foot(); break;
 
 default:
@@ -704,9 +725,10 @@ default:
         feed('p.reply_to IS NOT NULL AND (p.user_id = ?1 OR p.user_id IN (SELECT followee FROM follows WHERE follower = ?1) OR p.reply_to IN (SELECT id FROM posts WHERE user_id = ?1))', [$u['id']],
              'tab=replies&amp;', 'No replies yet. Reply to someone, or wait for a reply to your posts.', true);
     } elseif ($tab === 'following') {
+        if ($u && !isset($_GET['before'])) newposts_marker('following');
         feed('p.reply_to IS NULL AND (p.user_id = ?1 OR p.user_id IN (SELECT followee FROM follows WHERE follower = ?1))', [$u['id']], '',
              'Nothing here yet. Post something, or follow some people below.');
         if (!(int)q('SELECT COUNT(*) FROM follows WHERE follower = ?', [$u['id']])->fetchColumn()) render_suggestions($u);
-    } else feed('p.reply_to IS NULL', [], $u ? 'tab=all&amp;' : '');
+    } else { if (!isset($_GET['before'])) newposts_marker('all'); feed('p.reply_to IS NULL', [], $u ? 'tab=all&amp;' : ''); }
     page_foot();
 }

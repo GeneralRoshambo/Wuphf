@@ -122,6 +122,10 @@ function post_menu(array $p, ?array $viewer, bool $bookmarked): string {
     $uid = '<input type="hidden" name="id" value="' . (int)$p['user_id'] . '">';
     $out = '<details class="menu"><summary aria-label="More options" title="More">' . icon('more') . '</summary><div class="pop">';
     $out .= $item('bookmark', $id, $bookmarked ? 'Remove bookmark' : 'Bookmark');
+    if ($mine && !$p['reply_to'] && !$p['repost_of']) {
+        $pinned = (int)($viewer['pinned_post'] ?? 0) === (int)$p['id'];
+        $out .= $item('pin', $id . ($pinned ? '<input type="hidden" name="unpin" value="1">' : ''), $pinned ? 'Unpin from profile' : 'Pin to profile');
+    }
     if (!$mine) {
         $n = h($p['username']);
         $out .= $item('rel', $uid . '<input type="hidden" name="do" value="' . ($rel === 'mute' ? 'unmute' : 'mute') . '">', $rel === 'mute' ? "Unmute @$n" : "Mute @$n");

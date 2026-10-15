@@ -169,3 +169,6 @@ function mention_suggestions(array $viewer): never {
     json_out(['users' => array_map(fn($r) => ['u' => $r['username'], 'av' => (int)$r['avatar_v'] > 0 ? 'avatars/' . (int)$r['id'] . '.' . ($r['avatar_ext'] === 'gif' ? 'gif' : 'jpg') . '?v=' . (int)$r['avatar_v'] : '',
         'hue' => crc32(strtolower($r['username'])) % 360], $rows)]);
 }
+
+// ---- "N new posts" pill -------------------------------------------------------------
+function newposts_marker(string $scope): void { echo '<div id="newpill" class="newpill" data-scope="' . h($scope) . '" hidden></div>'; }

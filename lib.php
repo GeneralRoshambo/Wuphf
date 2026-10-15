@@ -71,6 +71,7 @@ function db(): PDO {
     $pdo->exec('CREATE INDEX IF NOT EXISTS throttle_k ON throttle(k, t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS posts_user ON posts(user_id, id)');
     if (!in_array('repost_of', $have('posts'))) $pdo->exec('ALTER TABLE posts ADD COLUMN repost_of INTEGER REFERENCES posts(id) ON DELETE CASCADE');
+    if (!in_array('pinned_post', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN pinned_post INTEGER');
     if (!in_array('digest', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN digest TEXT NOT NULL DEFAULT \'off\'');
     if (!in_array('digest_at', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN digest_at INTEGER NOT NULL DEFAULT 0');
     if (!in_array('edited_at', $have('posts'))) $pdo->exec('ALTER TABLE posts ADD COLUMN edited_at INTEGER');
@@ -638,6 +639,7 @@ const ICONS = [
     'bookmark' => '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
     'more'  => '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
     'sun'   => '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    'pin'   => '<path d="M12 17v5"/><path d="M9 3h6l-1 7 3 3v2H7v-2l3-3-1-7z"/>',
     'moon'  => '<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7Z"/>',
 ];
 function icon(string $n, string $cls = ''): string {
@@ -820,7 +822,7 @@ function compose_box(int $replyTo = 0, string $prefill = ''): void {
     global $CFG;
     $prompts = require __DIR__ . '/prompts.php';
     $ph = $replyTo ? 'Write your reply' : $prompts[array_rand($prompts)]; ?>
-<form method="post" action="?p=post" class="compose" id="<?= $replyTo ? 'reply' : 'compose' ?>">
+<form method="post" action="?p=post" class="compose" id="<?= $replyTo ? 'reply' : 'compose' ?>" data-draft="d:<?= (int)(me()['id'] ?? 0) ?>:<?= $replyTo ? 'r' . $replyTo : 'home' ?>">
 <input type="hidden" name="csrf" value="<?= csrf() ?>">
 <?php if ($replyTo): ?><input type="hidden" name="reply_to" value="<?= $replyTo ?>"><?php endif; ?>
 <?= avatar(me(), 40) ?>

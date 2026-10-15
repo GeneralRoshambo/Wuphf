@@ -350,3 +350,11 @@ input.mini:not([type=hidden]):not([type=file]):not([type=checkbox]){width:9.5em;
 .mpop .mi{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer}
 .mpop .mi.on,.mpop .mi:hover{background:var(--chip)}
 .stats a{color:inherit}.stats a:hover{text-decoration:underline}
+
+/* new-posts pill, pinned post */
+.newpill{position:fixed;top:72px;left:0;right:0;display:flex;justify-content:center;z-index:6;pointer-events:none}
+.newpill[hidden]{display:none}
+.pillbtn{pointer-events:auto;border:0;background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:700;font-size:.88rem;padding:8px 16px;border-radius:999px;box-shadow:0 6px 22px rgba(0,0,0,.25);cursor:pointer}
+.pinlabel{display:flex;align-items:center;gap:6px;margin:14px 0 0;color:var(--mute);font-size:.82rem;font-weight:600}
+.pinlabel svg{width:14px;height:14px}
+.pinned{border-bottom:2px solid var(--line)}

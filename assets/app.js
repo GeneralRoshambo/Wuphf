@@ -388,3 +388,47 @@ document.addEventListener('click', function (e) {
   document.addEventListener('click', function (e) { if (pop && !pop.contains(e.target) && e.target !== ta) hide(); });
   document.addEventListener('focusout', function (e) { if (e.target === ta) setTimeout(hide, 150); });
 })();
+
+// Drafts: whatever you are typing is kept in this browser until the post is sent.
+(function () {
+  var store = null; try { store = window.localStorage; store.getItem('x'); } catch (e) { return; }
+  var forms = document.querySelectorAll('form[data-draft]');
+  var sentKey = null; try { sentKey = sessionStorage.getItem('wuphf-sent'); sessionStorage.removeItem('wuphf-sent'); } catch (e) {}
+  var failed = !!document.querySelector('.flash:not(.ok):not(.banner)');
+  if (sentKey && !failed) { try { store.removeItem(sentKey); } catch (e) {} }
+  forms.forEach(function (f) {
+    var key = 'wuphf-' + f.dataset.draft, ta = f.querySelector('textarea'); if (!ta) return;
+    var base = ta.value, saved = null; try { saved = store.getItem(key); } catch (e) {}
+    if (saved && saved !== base && saved.trim() !== base.trim() && !ta.value.replace(base, '').trim()) {
+      ta.value = saved; ta.dispatchEvent(new Event('input', { bubbles: true }));
+      if (typeof toast === 'function') toast('Draft restored');
+      if (f.id === 'reply') { var d = document.getElementById('reply'); if (d && d.tagName === 'DETAILS') d.open = true; }
+    }
+    var t = null;
+    ta.addEventListener('input', function () {
+      clearTimeout(t); t = setTimeout(function () {
+        try { if (ta.value.trim() === '' || ta.value.trim() === base.trim()) store.removeItem(key); else store.setItem(key, ta.value); } catch (e) {}
+      }, 300);
+    });
+    f.addEventListener('submit', function () { try { store.setItem(key, ta.value); sessionStorage.setItem('wuphf-sent', key); } catch (e) {} });
+  });
+})();
+
+// "N new posts" pill on feeds: checks quietly now and then, never moves the page under you.
+(function () {
+  var pill = document.getElementById('newpill'); if (!pill || !window.fetch) return;
+  var scope = pill.dataset.scope, base = document.title;
+  function since() { var m = 0; document.querySelectorAll('article.post').forEach(function (a) { var n = parseInt(a.id.slice(1), 10) || 0; if (n > m) m = n; }); return m; }
+  var start = since(), busy = false;
+  function check() {
+    if (busy || document.hidden) return; busy = true;
+    fetch('?p=newposts&scope=' + scope + '&since=' + start, { credentials: 'same-origin' }).then(function (r) { return r.json(); }).then(function (d) {
+      busy = false; if (!d || !d.n) return;
+      pill.hidden = false; pill.innerHTML = '<button type="button" class="pillbtn">' + d.n + ' new post' + (d.n === 1 ? '' : 's') + ' ↑</button>';
+      document.title = '(' + d.n + ') ' + base;
+    }).catch(function () { busy = false; });
+  }
+  pill.addEventListener('click', function () { window.scrollTo(0, 0); location.reload(); });
+  setInterval(check, 45000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) check(); });
+})();

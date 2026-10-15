@@ -95,3 +95,5 @@ Scheduling (admins only): Admin > Schedule queues posts for a future time, optio
 
 Email digests: members can choose Daily or Weekly in Settings (off by default). A digest lists unread replies, mentions, likes and new followers plus popular posts from people they follow, and is only sent when there is something to say. Each email has a one-click unsubscribe link. Digests are sent from normal page loads (checked every 10 minutes). For exact timing, set `cron_key` in config.local.php and have cron request `https://yoursite/?p=cron&key=YOURKEY` every 10 to 15 minutes; that also publishes scheduled posts on time.
 Followers and Following lists are linked from every profile's counts. Typing `@` in a post box suggests usernames (people you follow first).
+
+Drafts: unsent posts and replies are kept in the browser (localStorage) and restored after a refresh. Pinning: the three-dot menu on your own top-level posts has Pin to profile (one at a time). New posts pill: feeds check every 45 seconds and show "N new posts" without moving the page.
