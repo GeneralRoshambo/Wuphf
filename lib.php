@@ -1,9 +1,22 @@
 <?php
 $CFG = require __DIR__ . '/config.php';
 
-session_set_cookie_params(['httponly' => true, 'samesite' => 'Lax',
+// Stay logged in for 30 days. Sessions live in our own folder (shared hosts clear the common
+// session folder after ~24 minutes) and the cookie is renewed on every visit.
+const SESSION_DAYS = 30;
+$sessDir = dirname($CFG['db_file']) . '/sessions';
+if (!is_dir($sessDir)) @mkdir($sessDir, 0700, true);
+if (is_dir($sessDir) && is_writable($sessDir)) session_save_path($sessDir);
+ini_set('session.gc_maxlifetime', (string)(SESSION_DAYS * 86400));
+ini_set('session.gc_probability', '1'); ini_set('session.gc_divisor', '100');
+ini_set('session.use_strict_mode', '1');
+session_set_cookie_params(['lifetime' => SESSION_DAYS * 86400, 'path' => '/', 'httponly' => true, 'samesite' => 'Lax',
     'secure' => !empty($_SERVER['HTTPS'])]);
 session_start();
+if (session_status() === PHP_SESSION_ACTIVE && !headers_sent() && isset($_SESSION['uid'])) {   // rolling expiry
+    $p = session_get_cookie_params();
+    setcookie(session_name(), session_id(), ['expires' => time() + SESSION_DAYS * 86400, 'path' => $p['path'], 'httponly' => true, 'samesite' => 'Lax', 'secure' => !empty($_SERVER['HTTPS'])]);
+}
 
 function db(): PDO {
     global $CFG;
