@@ -63,7 +63,7 @@ function blog_href(int $page = 1): string {
 }
 function blog_url(int $page = 1): string { return site_url() . '/' . blog_href($page); }
 
-function profile_href(string $name): string { return pretty_urls() ? rawurlencode($name) : '?p=user&u=' . urlencode($name); }
+function profile_href(string $name): string { return pretty_urls() ? strtolower(rawurlencode($name)) : '?p=user&u=' . urlencode($name); }   // /ryan, always lower case
 function profile_url(string $name): string { return site_url() . '/' . profile_href($name); }
 
 // ---- Slugs ------------------------------------------------------------------------
@@ -419,7 +419,7 @@ function resolve_path(string $raw): array {
         }
         $user = q('SELECT username FROM users WHERE username = ?', [$path])->fetch();
         if ($user) {
-            if ($path !== $user['username']) redirect_to(profile_url($user['username']));
+            if ($path !== strtolower($user['username'])) redirect_to(profile_url($user['username']));   // one address per person: lower case
             return ['route' => 'user', 'get' => ['u' => $user['username']]];
         }
         if (reserved_name($path) && ($t = reserved_target())) redirect_to(profile_url($t['username']), 302);

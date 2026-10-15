@@ -104,8 +104,8 @@ function render_suggestions(array $u, string $heading = 'Who to follow'): void {
     if (!$rows) return;
     echo '<h2>' . h($heading) . '</h2>';
     foreach ($rows as $r) {
-        echo '<div class="person"><a href="?p=user&amp;u=' . h($r['username']) . '">' . avatar($r, 40) . '</a>'
-            . '<a class="pname" href="?p=user&amp;u=' . h($r['username']) . '"><b>@' . h($r['username']) . '</b>'
+        echo '<div class="person"><a href="' . h(profile_href($r['username'])) . '">' . avatar($r, 40) . '</a>'
+            . '<a class="pname" href="' . h(profile_href($r['username'])) . '"><b>@' . h($r['username']) . '</b>'
             . ($r['bio'] !== '' ? '<br><small>' . h(mb_substr($r['bio'], 0, 80)) . '</small>' : '') . '</a>'
             . '<form method="post" action="?p=follow" class="inl folf" data-uid="' . (int)$r['id'] . '"><input type="hidden" name="csrf" value="' . csrf() . '">'
             . '<input type="hidden" name="id" value="' . (int)$r['id'] . '"><button class="fol">Follow</button></form></div>';
@@ -179,7 +179,7 @@ function page_notifications(array $u): void {
     echo '<h1>Notifications</h1>';
     $verbs = ['reply' => 'replied to your post', 'mention' => 'mentioned you', 'like' => 'liked your post', 'repost' => 'reposted your post', 'follow' => 'followed you'];
     foreach (array_slice($rows, 0, 40) as $n) {
-        $href = $n['kind'] === 'follow' ? '?p=user&amp;u=' . h($n['username']) : '?p=status&amp;id=' . (int)$n['post_id'];
+        $href = $n['kind'] === 'follow' ? h(profile_href($n['username'])) : '?p=status&amp;id=' . (int)$n['post_id'];
         echo '<a class="notif' . ($n['is_read'] ? '' : ' unread') . '" href="' . $href . '">' . avatar($n, 40) . '<span class="nb"><b>@' . h($n['username']) . '</b> '
             . h($verbs[$n['kind']] ?? $n['kind']) . ' <span class="t">' . h(ago((int)$n['created'])) . '</span>'
             . ($n['body'] ? '<span class="snip">' . h(mb_substr($n['body'], 0, 120)) . '</span>' : '') . '</span></a>';
@@ -319,7 +319,7 @@ function page_admin(array $u): void {
             echo '<div class="rbody">' . ($r['post_id'] ? 'Post by @' . h($r['target_name']) . ': ' : 'Account @' . h($r['target_name'])) . '<blockquote>' . h($r['snapshot']) . '</blockquote>';
             if ($r['note'] !== '') echo '<p class="hint">Note: ' . h($r['note']) . '</p>';
             if ($post) echo '<a href="?p=status&amp;id=' . (int)$post['id'] . '">Open post</a> &middot; ';
-            if ($tuser) echo '<a href="?p=user&amp;u=' . h($tuser['username']) . '">Open @' . h($tuser['username']) . '</a>';
+            if ($tuser) echo '<a href="' . h(profile_href($tuser['username'])) . '">Open @' . h($tuser['username']) . '</a>';
             echo '</div><div class="ractions">';
             $rid = '<input type="hidden" name="rid" value="' . (int)$r['id'] . '">';
             if ($post) echo $btn('remove_post', 'Remove post', $rid . '<input type="hidden" name="pid" value="' . (int)$post['id'] . '">', 'Remove this post?', 'dangerbtn');
@@ -334,7 +334,7 @@ function page_admin(array $u): void {
         echo '<form class="card" method="get" action="./"><input type="hidden" name="p" value="admin"><input type="hidden" name="tab" value="users"><input type="search" name="q" value="' . h($q) . '" placeholder="Search username or email"></form>';
         foreach ($rows as $r) {
             $uidf = '<input type="hidden" name="uid" value="' . (int)$r['id'] . '">';
-            echo '<div class="arow"><div class="who"><a href="?p=user&amp;u=' . h($r['username']) . '"><b>@' . h($r['username']) . '</b></a>'
+            echo '<div class="arow"><div class="who"><a href="' . h(profile_href($r['username'])) . '"><b>@' . h($r['username']) . '</b></a>'
                 . ((int)$r['is_suspended'] ? ' <span class="pill bad">suspended</span>' : '') . (is_admin($r) ? ' <span class="pill">admin</span>' : '')
                 . '<br><small>' . h($r['email'] ?: 'no email') . ((int)$r['email_ok'] ? '' : ' (unconfirmed)') . ' &middot; ' . (int)$r['np'] . ' posts &middot; joined ' . h(date('M j, Y', (int)$r['created'])) . '</small></div><div class="ractions">';
             echo '<form method="post" action="?p=admin" class="inl renamef">' . $csrf . '<input type="hidden" name="do" value="rename_user">' . $uidf

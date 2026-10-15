@@ -137,12 +137,12 @@ function page_follows(?array $viewer): void {
     $total = (int)q("SELECT COUNT(*) FROM follows f JOIN users x ON x.id = f.$them WHERE f.$me = ? AND x.id NOT IN ($ids)", [$prof['id']])->fetchColumn();
     $rows = q("SELECT x.* FROM follows f JOIN users x ON x.id = f.$them WHERE f.$me = ? AND x.id NOT IN ($ids) ORDER BY f.rowid DESC LIMIT $per OFFSET " . (($page - 1) * $per), [$prof['id']])->fetchAll();
     page_head('@' . $prof['username'] . ': ' . ($tab === 'followers' ? 'Followers' : 'Following'));
-    echo '<h1 class="sr">@' . h($prof['username']) . ' ' . ($tab === 'followers' ? 'followers' : 'following') . '</h1><p class="crumb"><a class="back" href="?p=user&amp;u=' . h($prof['username']) . '">&larr; @' . h($prof['username']) . '</a></p>';
+    echo '<h1 class="sr">@' . h($prof['username']) . ' ' . ($tab === 'followers' ? 'followers' : 'following') . '</h1><p class="crumb"><a class="back" href="' . h(profile_href($prof['username'])) . '">&larr; @' . h($prof['username']) . '</a></p>';
     tab_bar(['followers' => 'Followers', 'following' => 'Following'], $tab, 'p=follows&amp;u=' . h($prof['username']) . '&amp;');
     $mine = $viewer ? following_ids($viewer) : [];
     foreach ($rows as $r) {
-        echo '<div class="person"><a href="?p=user&amp;u=' . h($r['username']) . '">' . avatar($r, 40) . '</a>'
-            . '<a class="pname" href="?p=user&amp;u=' . h($r['username']) . '"><b>@' . h($r['username']) . '</b>'
+        echo '<div class="person"><a href="' . h(profile_href($r['username'])) . '">' . avatar($r, 40) . '</a>'
+            . '<a class="pname" href="' . h(profile_href($r['username'])) . '"><b>@' . h($r['username']) . '</b>'
             . ($r['bio'] !== '' ? '<br><small>' . h(mb_substr($r['bio'], 0, 80)) . '</small>' : '') . '</a>';
         if ($viewer && (int)$viewer['id'] !== (int)$r['id'] && !in_array((int)$r['id'], $mine, true))
             echo '<form method="post" action="?p=follow" class="inl folf" data-uid="' . (int)$r['id'] . '"><input type="hidden" name="csrf" value="' . csrf() . '">'

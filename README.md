@@ -104,3 +104,5 @@ More admin tools (Admin screen): Stats (members, posts and active members per da
 Emails: confirm, reset, login-code and email-change messages, the digest, and the optional instant reply/mention emails (Settings) all use one styled HTML template with a plain-text fallback.
 Performance and safety: the database runs in WAL mode (about 2.7x more requests per second under mixed read/write load), has indexes for follower counts and reposts, and pages are gzip-compressed when mod_deflate is on. Limits per person: 60 posts an hour, 100 follows an hour, 120 searches per 10 minutes, 900 writes an hour; 10 failed logins per network and 20 per account per hour; sign-up form has a hidden bot trap and a minimum fill time (`signup_min_seconds`, default 2).
 Accessibility: skip link, one h1 per page, labelled landmarks, focus-trapped share dialog, 32px touch targets, and no axe-core violations on the main pages in light and dark at 320, 375 and 1100 px.
+
+Profile addresses: every profile link is now /username in lower case (for example https://wuphf.lol/ryan). Other capitalisations redirect to it, and old ?p=user&u=Name links still work.

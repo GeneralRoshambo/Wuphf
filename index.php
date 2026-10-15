@@ -241,7 +241,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($_POST['unpin'])) { q('UPDATE users SET pinned_post = NULL WHERE id = ? AND pinned_post = ?', [$u['id'], $pid]); flash('Unpinned.', 'ok'); go($_SERVER['HTTP_REFERER'] ?? './'); }
         if (!q('SELECT 1 FROM posts WHERE id = ? AND user_id = ? AND reply_to IS NULL AND repost_of IS NULL', [$pid, $u['id']])->fetch()) { flash('Only your own posts can be pinned.'); go($_SERVER['HTTP_REFERER'] ?? './'); }
         q('UPDATE users SET pinned_post = ? WHERE id = ?', [$pid, $u['id']]);
-        flash('Pinned to your profile.', 'ok'); go('?p=user&u=' . urlencode($u['username']));
+        flash('Pinned to your profile.', 'ok'); go(profile_href($u['username']));
 
     case 'follow':
         $t = (int)($_POST['id'] ?? 0);
@@ -586,7 +586,7 @@ case 'embed':
         . '</style></head><body>';
     if (!$post) { echo '<main><h1 class="sr">Unavailable</h1><div class="c"><span class="m">This Wuphf is no longer available.</span></div></main>'; }
     else {
-        echo '<main><h1 class="sr">Post by @' . h($post['username']) . '</h1><div class="c"><div class="h"><a href="?p=user&amp;u=' . h($post['username']) . '">' . avatar($post, 40) . '</a><div><a class="n" href="?p=user&amp;u=' . h($post['username']) . '">@' . h($post['username']) . '</a><div class="m">' . h(date('M j, Y', (int)$post['created'])) . '</div></div></div>'
+        echo '<main><h1 class="sr">Post by @' . h($post['username']) . '</h1><div class="c"><div class="h"><a href="' . h(profile_href($post['username'])) . '">' . avatar($post, 40) . '</a><div><a class="n" href="' . h(profile_href($post['username'])) . '">@' . h($post['username']) . '</a><div class="m">' . h(date('M j, Y', (int)$post['created'])) . '</div></div></div>'
             . '<p class="t">' . render_body($post['body']) . '</p>'
             . '<div class="f"><span>' . (int)$post['likes'] . ' likes &middot; ' . (int)$post['replies'] . ' replies &middot; ' . (int)$post['reposts'] . ' reposts</span><a class="w" href="?p=status&amp;id=' . (int)$post['id'] . '">' . h($CFG['site_name']) . '</a></div></div></main>';
     }
@@ -645,7 +645,7 @@ case 'search':
         if ($people) {
             echo '<h2>People</h2>';
             foreach ($people as $pp) {
-                echo '<a class="card person" href="?p=user&amp;u=' . h($pp['username']) . '">' . avatar($pp, 40)
+                echo '<a class="card person" href="' . h(profile_href($pp['username'])) . '">' . avatar($pp, 40)
                     . '<span><b>@' . h($pp['username']) . '</b>' . ($pp['bio'] !== '' ? '<br><small>' . h($pp['bio']) . '</small>' : '') . '</span></a>';
             }
         }

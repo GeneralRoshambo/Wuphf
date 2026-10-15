@@ -445,7 +445,7 @@ function render_body(string $raw): string {
         if ($i % 2 === 0) { $out .= h($part); continue; }
         $w = substr($part, 1);
         if ($part[0] === '@' && preg_match('/^[A-Za-z0-9_]{3,15}$/', $w)) {
-            $out .= '<a href="?p=user&amp;u=' . h($w) . '">@' . h($w) . '</a>';
+            $out .= '<a href="' . h(profile_href($w)) . '">@' . h($w) . '</a>';
         } elseif ($part[0] === '#' && len($w) <= 30 && !ctype_digit($w)) {
             $out .= '<a href="?p=tag&amp;t=' . h(urlencode(mb_strtolower($w, 'UTF-8'))) . '">#' . h($w) . '</a>';
         } else $out .= h($part);
@@ -724,10 +724,10 @@ function render_posts(array $rows, ?array $viewer, bool $thread = false): void {
         if (in_array((int)$p['user_id'], $hide, true) || in_array((int)$row['user_id'], $hide, true)) continue;
         $pid = (int)$p['id'];
         echo '<article class="post" id="p' . (int)$row['id'] . '">';
-        echo '<a href="?p=user&amp;u=' . h($p['username']) . '">' . avatar($p, 40) . '</a>';
+        echo '<a href="' . h(profile_href($p['username'])) . '">' . avatar($p, 40) . '</a>';
         echo '<div class="pb">';
-        if ($by !== null) echo '<div class="rpby">' . icon('repeat') . '<a href="?p=user&amp;u=' . h($by) . '">@' . h($by) . '</a> reposted</div>';
-        echo '<div class="phd"><a class="un" href="?p=user&amp;u=' . h($p['username']) . '">@' . h($p['username']) . '</a> <a class="t" href="?p=status&amp;id=' . $pid . '">' . h(ago((int)$p['created'])) . '</a>' . (!empty($p['edited_at']) ? ' <span class="edited" title="Edited">edited</span>' : '');
+        if ($by !== null) echo '<div class="rpby">' . icon('repeat') . '<a href="' . h(profile_href($by)) . '">@' . h($by) . '</a> reposted</div>';
+        echo '<div class="phd"><a class="un" href="' . h(profile_href($p['username'])) . '">@' . h($p['username']) . '</a> <a class="t" href="?p=status&amp;id=' . $pid . '">' . h(ago((int)$p['created'])) . '</a>' . (!empty($p['edited_at']) ? ' <span class="edited" title="Edited">edited</span>' : '');
         $author = (int)$p['user_id'];
         if ($viewer && $author !== (int)$viewer['id'] && !in_array($author, $following, true)) {
             echo '<form method="post" action="?p=follow" class="inl folf" data-uid="' . $author . '">'
@@ -787,7 +787,7 @@ function page_head(string $title, array $meta = []): void {
 <a class="skip" href="#main">Skip to content</a>
 <header><div class="bar"><a class="logo" href="./"><?= h($CFG['site_name']) ?></a><nav class="nav">
 <?php if ($u): $unread = unread_count($u); ?>
-<a href="?p=user&amp;u=<?= h($u['username']) ?>">@<?= h($u['username']) ?></a>
+<a href="<?= h(profile_href($u['username'])) ?>">@<?= h($u['username']) ?></a>
 <a href="?p=public">Public</a>
 <a href="?p=settings">Settings</a>
 <?php if (is_admin($u)): ?><a href="?p=admin">Admin</a><?php endif; ?>
