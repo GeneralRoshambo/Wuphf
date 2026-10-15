@@ -198,16 +198,24 @@ function build_id(): string {
 
 function client_ip(): string { return $_SERVER['REMOTE_ADDR'] ?? '0'; }
 
-function send_mail(string $to, string $subject, string $body): bool {
+function send_mail(string $to, string $subject, string $body, ?string $html = null): bool {
     global $CFG;
     if (!filter_var($to, FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/', $to)) return false;
     $from = $CFG['mail_from'];
     if ($CFG['mail_mode'] === 'log') {
-        return file_put_contents(dirname($CFG['db_file']) . '/outbox.log', "To: $to\nSubject: $subject\n\n$body\n-----\n", FILE_APPEND) !== false;
+        return file_put_contents(dirname($CFG['db_file']) . '/outbox.log', "To: $to\nSubject: $subject\n\n$body\n" . ($html !== null ? "[HTML]\n$html\n" : '') . "-----\n", FILE_APPEND) !== false;
     }
-    $headers = "From: {$CFG['site_name']} <$from>\r\nReply-To: $from\r\nMIME-Version: 1.0\r\n"
-        . "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\nX-Mailer: Wuphf";
-    return @mail($to, '=?UTF-8?B?' . base64_encode($subject) . '?=', str_replace("\n", "\r\n", $body), $headers, '-f' . $from);
+    $headers = "From: {$CFG['site_name']} <$from>\r\nReply-To: $from\r\nMIME-Version: 1.0\r\nX-Mailer: Wuphf\r\n";
+    if ($html === null) {
+        $headers .= "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit";
+        $msg = str_replace("\n", "\r\n", $body);
+    } else {
+        $bd = 'wuphf_' . bin2hex(random_bytes(8));
+        $headers .= "Content-Type: multipart/alternative; boundary=\"$bd\"";
+        $part = fn($type, $text) => "Content-Type: $type; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n" . chunk_split(base64_encode(str_replace("\n", "\r\n", $text)));
+        $msg = "--$bd\r\n" . $part('text/plain', $body) . "--$bd\r\n" . $part('text/html', $html) . "--$bd--\r\n";
+    }
+    return @mail($to, '=?UTF-8?B?' . base64_encode($subject) . '?=', $msg, $headers, '-f' . $from);
 }
 
 /** Create a token (old unused ones of the same kind for the user are cancelled). Returns the raw value to email. */
