@@ -71,6 +71,8 @@ function db(): PDO {
     $pdo->exec('CREATE INDEX IF NOT EXISTS throttle_k ON throttle(k, t)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS posts_user ON posts(user_id, id)');
     if (!in_array('repost_of', $have('posts'))) $pdo->exec('ALTER TABLE posts ADD COLUMN repost_of INTEGER REFERENCES posts(id) ON DELETE CASCADE');
+    if (!in_array('digest', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN digest TEXT NOT NULL DEFAULT \'off\'');
+    if (!in_array('digest_at', $have('users'))) $pdo->exec('ALTER TABLE users ADD COLUMN digest_at INTEGER NOT NULL DEFAULT 0');
     if (!in_array('edited_at', $have('posts'))) $pdo->exec('ALTER TABLE posts ADD COLUMN edited_at INTEGER');
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS reposts_once ON posts(user_id, repost_of) WHERE repost_of IS NOT NULL');
     $pdo->exec('CREATE TABLE IF NOT EXISTS reactions (
@@ -826,3 +828,4 @@ require __DIR__ . '/extras.php';
 require __DIR__ . '/cms.php';
 require __DIR__ . '/cms_admin.php';
 require __DIR__ . '/schedule.php';
+require __DIR__ . '/digest.php';

@@ -336,3 +336,55 @@ document.addEventListener('click', function (e) {
     });
   });
 })();
+
+// @mention suggestions: type @ and a few letters in any post box, then pick with Enter, Tab or a click.
+(function () {
+  var pop = null, ta = null, items = [], idx = 0, timer = null, seq = 0, loggedIn = !!document.querySelector('a[href="?p=notifications"]');
+  if (!loggedIn || !window.fetch) return;
+  function token(t) {
+    var before = t.value.slice(0, t.selectionStart), m = /(^|[^\w@])@([A-Za-z0-9_]{0,15})$/.exec(before);
+    return m ? { q: m[2], start: before.length - m[2].length - 1 } : null;
+  }
+  function hide() { if (pop) pop.hidden = true; items = []; }
+  function render() {
+    if (!pop) { pop = document.createElement('div'); pop.className = 'mpop'; pop.setAttribute('role', 'listbox'); document.body.appendChild(pop);
+      pop.addEventListener('mousedown', function (e) { var li = e.target.closest('[data-i]'); if (li) { e.preventDefault(); pick(+li.dataset.i); } }); }
+    if (!items.length || !ta) { pop.hidden = true; return; }
+    pop.innerHTML = ''; 
+    items.forEach(function (u, n) {
+      var li = document.createElement('div'); li.className = 'mi' + (n === idx ? ' on' : ''); li.dataset.i = n; li.setAttribute('role', 'option');
+      var av = u.av ? '<img class="av" width="24" height="24" alt="" src="' + u.av + '">' : '<span class="av ph" style="width:24px;height:24px;line-height:24px;font-size:12px;background:hsl(' + u.hue + ',45%,45%)">' + u.u[0].toUpperCase() + '</span>';
+      li.innerHTML = av + '<b></b>'; li.querySelector('b').textContent = '@' + u.u; pop.appendChild(li);
+    });
+    var r = ta.getBoundingClientRect(); pop.style.left = (r.left + window.scrollX) + 'px'; pop.style.top = (r.bottom + window.scrollY + 4) + 'px'; pop.style.minWidth = Math.min(240, r.width) + 'px'; pop.hidden = false;
+  }
+  function pick(n) {
+    var u = items[n]; if (!u || !ta) return; var tk = token(ta); if (!tk) return hide();
+    var after = ta.value.slice(ta.selectionStart);
+    ta.value = ta.value.slice(0, tk.start) + '@' + u.u + ' ' + after.replace(/^[A-Za-z0-9_]*/, '');
+    var pos = tk.start + u.u.length + 2; ta.setSelectionRange(pos, pos); ta.dispatchEvent(new Event('input', { bubbles: true })); hide(); ta.focus();
+  }
+  document.addEventListener('input', function (e) {
+    var t = e.target; if (!t.matches || !t.matches('textarea[name=body], #body')) return;
+    ta = t; var tk = token(t); clearTimeout(timer);
+    if (!tk) return hide();
+    var my = ++seq;
+    timer = setTimeout(function () {
+      fetch('?p=mentions&q=' + encodeURIComponent(tk.q), { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : { users: [] }; }).then(function (d) {
+        if (my !== seq || !token(ta)) return; items = d.users || []; idx = 0; render();
+      }).catch(hide);
+    }, 120);
+  });
+  // Capture phase so Enter picks a suggestion instead of sending the post.
+  document.addEventListener('keydown', function (e) {
+    if (!pop || pop.hidden || !items.length || e.target !== ta) return;
+    if (e.key === 'ArrowDown') { idx = (idx + 1) % items.length; render(); }
+    else if (e.key === 'ArrowUp') { idx = (idx + items.length - 1) % items.length; render(); }
+    else if (e.key === 'Enter' || e.key === 'Tab') { pick(idx); }
+    else if (e.key === 'Escape') { hide(); }
+    else return;
+    e.preventDefault(); e.stopImmediatePropagation();
+  }, true);
+  document.addEventListener('click', function (e) { if (pop && !pop.contains(e.target) && e.target !== ta) hide(); });
+  document.addEventListener('focusout', function (e) { if (e.target === ta) setTimeout(hide, 150); });
+})();

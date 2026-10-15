@@ -229,7 +229,7 @@ function md_toc(array $headings, string $pageUrl): string {
 }
 
 // ---- SEO head ------------------------------------------------------------------------
-const NOINDEX_ROUTES = ['login', 'register', 'forgot', 'reset', 'confirm', 'verify', 'settings', 'account', 'notifications', 'bookmarks', 'report', 'admin', 'search'];
+const NOINDEX_ROUTES = ['login', 'register', 'forgot', 'reset', 'confirm', 'verify', 'settings', 'account', 'notifications', 'bookmarks', 'report', 'admin', 'search', 'follows', 'unsub'];
 
 function seo_title(string $t): string {
     global $CFG;

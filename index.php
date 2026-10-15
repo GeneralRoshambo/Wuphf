@@ -12,6 +12,7 @@ if ($route === 'robots') render_robots();
 if ($route === 'blogfeed') blog_feed();
 $u     = me();
 publish_due();
+send_digests_due();
 
 // ---- POST actions -------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -117,6 +118,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         q('UPDATE users SET email_ok = 1 WHERE id = ?', [$tok['user_id']]);
         burn_token((int)$tok['id']);
         flash('Email confirmed. You can post now.', 'ok'); go('./');
+
+    case 'unsub':
+        $uid = (int)($_POST['u'] ?? 0);
+        if (!hash_equals(unsub_token($uid), (string)($_POST['t'] ?? ''))) { flash('That link is not valid.'); go('./'); }
+        q("UPDATE users SET digest = 'off' WHERE id = ?", [$uid]);
+        flash('Email digests are off.', 'ok'); go('./');
 
     case 'logout':
         $_SESSION = []; session_destroy(); go('./');
@@ -382,7 +389,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $tf = !empty($_POST['twofa']) ? 1 : 0;
         if ($tf && !(int)$u['email_ok']) { flash('Confirm your email before turning on login codes.'); go('?p=settings'); }
-        q('UPDATE users SET bio = ?, website = ?, twofa = ? WHERE id = ?', [$bio, $site, $tf, $u['id']]);
+        $dg = in_array($_POST['digest'] ?? '', ['off', 'daily', 'weekly'], true) ? $_POST['digest'] : 'off';
+        if ($dg !== 'off' && !(int)$u['email_ok']) { flash('Confirm your email before turning on digests.'); go('?p=settings'); }
+        $dgAt = $dg !== $u['digest'] ? time() : (int)$u['digest_at'];   // changing it restarts the clock
+        q('UPDATE users SET bio = ?, website = ?, twofa = ?, digest = ?, digest_at = ? WHERE id = ?', [$bio, $site, $tf, $dg, $dgAt, $u['id']]);
         flash('Profile saved.', 'ok'); go('?p=settings');
     }
     http_response_code(404); exit('Not found');
@@ -482,7 +492,7 @@ case 'user':
 <div><h1>@<?= h($prof['username']) ?></h1>
 <?php if ($prof['bio'] !== ''): ?><p><?= render_body($prof['bio']) ?></p><?php endif; ?>
 <?php if ($prof['website'] !== ''): ?><p class="site"><a href="<?= h($prof['website']) ?>" target="_blank" rel="nofollow noopener noreferrer ugc"><?= h(preg_replace('~^https?://(www\.)?~i', '', rtrim($prof['website'], '/'))) ?></a></p><?php endif; ?>
-<p class="stats"><b><?= $nPosts ?></b> posts · <b><?= $nFollowing ?></b> following · <b><?= $nFollowers ?></b> followers</p>
+<p class="stats"><b><?= $nPosts ?></b> posts · <a href="?p=follows&amp;u=<?= h($prof['username']) ?>&amp;tab=following"><b><?= $nFollowing ?></b> following</a> · <a href="?p=follows&amp;u=<?= h($prof['username']) ?>&amp;tab=followers"><b><?= $nFollowers ?></b> followers</a></p>
 <?php if ($u && (int)$u['id'] !== (int)$prof['id']): ?>
 <?php if ($myrel === 'block'): ?><p class="hint">You blocked this account.</p>
 <?php elseif ($theyBlocked): ?><p class="hint">@<?= h($prof['username']) ?> has blocked you.</p>
@@ -560,6 +570,25 @@ case 'embed':
     echo '<script>function s(){parent.postMessage({wuphf:"h",id:' . (int)$id . ',h:Math.ceil(document.body.getBoundingClientRect().height)+4},"*")}addEventListener("load",s);addEventListener("resize",s);new Image().onload=s;</script></body></html>';
     exit;
 
+case 'follows':
+    page_follows($u); break;
+
+case 'mentions':
+    if (!$u) json_out(['users' => []], 401);
+    mention_suggestions($u);
+
+case 'unsub':
+    $uid = (int)($_GET['u'] ?? 0); $tt = (string)($_GET['t'] ?? '');
+    page_head('Email digests');
+    if (!hash_equals(unsub_token($uid), $tt)) echo '<h1>Email digests</h1><p class="empty">That link is not valid.</p>';
+    else echo '<h1>Stop email digests?</h1><form method="post" action="?p=unsub" class="card"><input type="hidden" name="csrf" value="' . csrf() . '"><input type="hidden" name="u" value="' . $uid . '"><input type="hidden" name="t" value="' . h($tt) . '"><button class="btn">Turn off digests</button></form>';
+    page_foot(); break;
+
+case 'cron':
+    header('Content-Type: text/plain');
+    if ($CFG['cron_key'] === '' || !hash_equals((string)$CFG['cron_key'], (string)($_GET['key'] ?? ''))) { http_response_code(403); exit('forbidden'); }
+    publish_due(); echo 'ok ' . send_digests_due(true) . ' digests'; exit;
+
 case 'tag':
     $tag = mb_strtolower(trim((string)($_GET['t'] ?? '')), 'UTF-8');
     page_head('#' . $tag); echo '<h1>#' . h($tag) . '</h1>';
@@ -605,6 +634,8 @@ case 'settings':
 <span class="hint"><?= $u['email'] === '' ? '' : ((int)$u['email_ok'] ? 'Confirmed.' : 'Not confirmed yet. Use the banner at the top to resend the link.') ?></span></label>
 <label class="check"><input type="checkbox" name="twofa" value="1" <?= ((int)$u['twofa'] || $CFG['force_2fa']) ? 'checked' : '' ?> <?= ($CFG['force_2fa'] || !(int)$u['email_ok']) ? 'disabled' : '' ?>>
 Ask for a login code by email each time I log in</label>
+<label>Email digest <span class="hint">A summary of replies, mentions, likes and popular posts from people you follow. Only sent when there is something to say.</span>
+<select name="digest"><?php foreach (['off' => 'Off', 'daily' => 'Daily', 'weekly' => 'Weekly'] as $dk => $dl): ?><option value="<?= $dk ?>"<?= $u['digest'] === $dk ? ' selected' : '' ?>><?= $dl ?></option><?php endforeach; ?></select></label>
 <label>Profile link (shown on your profile only)
 <input type="text" inputmode="url" autocapitalize="off" name="website" value="<?= h($u['website']) ?>" maxlength="100" placeholder="https://example.com"></label>
 <button class="btn" id="savebtn">Save</button>

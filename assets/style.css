@@ -343,3 +343,10 @@ input.mini:not([type=hidden]):not([type=file]):not([type=checkbox]){width:9.5em;
 .chips button.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .sheetacts{display:flex;gap:8px;flex-wrap:wrap}
 .sheetacts .ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+
+/* @mention suggestions */
+.mpop{position:absolute;z-index:40;background:var(--surface);border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:4px;max-width:92vw}
+.mpop[hidden]{display:none}
+.mpop .mi{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer}
+.mpop .mi.on,.mpop .mi:hover{background:var(--chip)}
+.stats a{color:inherit}.stats a:hover{text-decoration:underline}
